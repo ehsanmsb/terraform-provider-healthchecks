@@ -1,0 +1,50 @@
+name: Roadmap item
+description: Track a planned provider enhancement as a scoped implementation issue
+title: "chore: roadmap item "
+labels:
+  - roadmap
+body:
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: add read-only project data source
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: What is included in this item?
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation_notes
+    attributes:
+      label: Implementation notes
+      description: Relevant endpoints, forms, models, tests, or edge cases
+
+  - type: textarea
+    id: acceptance_criteria
+    attributes:
+      label: Acceptance criteria
+      description: Flat checklist items are great here
+      value: |
+        - [ ]
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - High
+        - Medium
+        - Low
+    validations:
+      required: true

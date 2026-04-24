@@ -1,0 +1,66 @@
+name: Feature request
+description: Propose a new resource, data source, auth mode, or provider capability
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea. Please describe the user need and, if possible, how it maps to Healthchecks behavior or APIs.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      placeholder: add direct project API key authentication
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user workflow is blocked or inefficient today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the ideal provider/resource/data source/configuration behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: healthchecks_mapping
+    attributes:
+      label: Healthchecks API/UI mapping
+      description: Link or describe the relevant Healthchecks endpoint, view, form, or workflow if known
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Provider authentication
+        - Project resource
+        - Check resource
+        - Integration resource
+        - Project member resource
+        - Data sources
+        - Documentation
+        - Testing / CI
+        - Release / packaging
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I searched existing issues before opening this request
+          required: true

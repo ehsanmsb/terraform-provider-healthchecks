@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Local testing guide
+    url: https://github.com/ehsanmsb/terraform-provider-healthchecks/blob/main/docs/local-testing.md
+    about: Start here for local Healthchecks and Terraform smoke-test setup
+  - name: Provider docs
+    url: https://github.com/ehsanmsb/terraform-provider-healthchecks/tree/main/docs
+    about: Check the provider and resource documentation before opening a question
