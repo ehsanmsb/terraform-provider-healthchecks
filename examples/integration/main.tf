@@ -15,3 +15,14 @@ resource "healthchecks_integration" "webhook" {
     body_up     = "{\"state\":\"up\"}"
   }
 }
+
+resource "healthchecks_integration" "email" {
+  project_id = healthchecks_project.example.id
+  type       = "email"
+
+  config = {
+    value = "alerts@example.com"
+    down  = "true"
+    up    = "false"
+  }
+}

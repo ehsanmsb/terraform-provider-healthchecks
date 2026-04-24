@@ -122,10 +122,62 @@ func TestParseProjectKeyStates(t *testing.T) {
 }
 
 func TestFindCreatedProjectKeyPingKey(t *testing.T) {
-	body := `<div id="key-created-modal">1fj9XWM6Ns8vLGTmnPGk9g</div>`
+	body := `<div id="key-created-modal"><input readonly value="1fj9XWM6Ns8vLGTmnPGk9g" /></div>`
 	got := findCreatedProjectKey(body)
 	if got != "1fj9XWM6Ns8vLGTmnPGk9g" {
 		t.Fatalf("unexpected key: %q", got)
+	}
+}
+
+func TestFindCreatedProjectKeyIgnoresCSRFToken(t *testing.T) {
+	body := `
+		<input type="hidden" name="csrfmiddlewaretoken" value="DHl48M7lQmV2prjCZTfz1pNwJOLWkfL1EEsh4zfgHzbKxNeALJGKVQ7G9uylTUW9">
+		<div id="key-created-modal">
+			<input type="text" class="form-control" value="hcw_UapC9r2P2GUaX8YegBqUoBMDBX8C" readonly />
+		</div>
+	`
+	got := findCreatedProjectKey(body)
+	if got != "hcw_UapC9r2P2GUaX8YegBqUoBMDBX8C" {
+		t.Fatalf("unexpected key: %q", got)
+	}
+}
+
+func TestEmailConfigToFormValues(t *testing.T) {
+	values := emailConfigToFormValues(map[string]string{
+		"value": "ops@example.com",
+		"up":    "false",
+		"down":  "true",
+	})
+
+	if values.Get("value") != "ops@example.com" {
+		t.Fatalf("unexpected value: %q", values.Get("value"))
+	}
+	if values.Get("down") != "on" {
+		t.Fatalf("expected down checkbox to be set")
+	}
+	if values.Get("up") != "" {
+		t.Fatalf("expected up checkbox to be omitted")
+	}
+}
+
+func TestParseBoolString(t *testing.T) {
+	cases := []struct {
+		input        string
+		defaultValue bool
+		want         bool
+	}{
+		{input: "true", defaultValue: false, want: true},
+		{input: "false", defaultValue: true, want: false},
+		{input: "", defaultValue: true, want: true},
+		{input: "", defaultValue: false, want: false},
+		{input: "on", defaultValue: false, want: true},
+		{input: "off", defaultValue: true, want: false},
+	}
+
+	for _, tc := range cases {
+		if got := parseBoolString(tc.input, tc.defaultValue); got != tc.want {
+			t.Fatalf("parseBoolString(%q, %t) = %t, want %t", tc.input, tc.defaultValue, got, tc.want)
+		}
 	}
 }
 

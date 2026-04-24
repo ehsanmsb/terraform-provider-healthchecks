@@ -1,6 +1,6 @@
 # Healthchecks Provider
 
-This provider manages Healthchecks projects, checks, webhook integrations, and project members.
+This provider manages Healthchecks projects, checks, integrations, and project members.
 
 Supported authentication today:
 
@@ -26,3 +26,8 @@ Project support includes sensitive computed attributes for:
 - ping key
 
 and boolean toggles for enabling or revoking those keys from Terraform.
+
+Integration support today includes:
+
+- `webhook`
+- `email`

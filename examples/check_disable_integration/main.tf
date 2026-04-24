@@ -1,28 +1,28 @@
 resource "healthchecks_project" "example" {
-  name = "Checks Project"
+  name = "Check Disable Integration Project"
 }
 
 resource "healthchecks_integration" "webhook" {
   project_id = healthchecks_project.example.id
   type       = "webhook"
-  name       = "Checks Webhook"
+  name       = "Disable Demo Webhook"
 
   config = {
     method_down = "POST"
     url_down    = "https://example.com/down"
-    body_down   = "{\"state\":\"down\"}"
     method_up   = "POST"
     url_up      = "https://example.com/up"
-    body_up     = "{\"state\":\"up\"}"
   }
 }
 
-resource "healthchecks_check" "job" {
+resource "healthchecks_check" "enabled" {
   project_id = healthchecks_project.example.id
-  name       = "nightly-job"
-  slug       = "nightly-job"
-  timeout    = 3600
-  grace      = 300
-  tags       = ["batch", "nightly"]
+  name       = "job-with-webhook"
   channels   = [healthchecks_integration.webhook.id]
+}
+
+resource "healthchecks_check" "disabled" {
+  project_id = healthchecks_project.example.id
+  name       = "job-without-webhook"
+  channels   = []
 }

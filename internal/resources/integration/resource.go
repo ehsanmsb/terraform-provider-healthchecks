@@ -41,7 +41,7 @@ func (r *integrationResource) Metadata(_ context.Context, req resource.MetadataR
 
 func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages project integrations. The initial implementation supports webhook channels through authenticated web form endpoints (`/projects/<code>/add_webhook/`, `/integrations/<code>/edit/`, `/integrations/<code>/remove/`).",
+		MarkdownDescription: "Manages project integrations. The current implementation supports `webhook` and `email` channels through authenticated web form endpoints.",
 		Attributes: map[string]schema.Attribute{
 			"id":         schema.StringAttribute{Computed: true},
 			"project_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
@@ -65,14 +65,10 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if plan.Type.ValueString() != "webhook" {
-		resp.Diagnostics.AddError("Unsupported Integration Type", "Only `webhook` is currently implemented.")
-		return
-	}
 	cfg, _ := mapToStrings(ctx, plan.Config)
-	integration, err := r.client.CreateWebhookIntegration(ctx, client.Integration{
+	integration, err := r.createIntegration(ctx, client.Integration{
 		ProjectID: plan.ProjectID.ValueString(),
-		Type:      "webhook",
+		Type:      plan.Type.ValueString(),
 		Name:      plan.Name.ValueString(),
 		Config:    cfg,
 	})
@@ -91,7 +87,7 @@ func (r *integrationResource) Read(ctx context.Context, req resource.ReadRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	integration, err := r.client.GetWebhookIntegration(ctx, state.ProjectID.ValueString(), state.ID.ValueString())
+	integration, err := r.getIntegration(ctx, state.ProjectID.ValueString(), state.ID.ValueString(), state.Type.ValueString())
 	if err != nil {
 		if errors.Is(err, client.ErrNotFound()) {
 			resp.State.RemoveResource(ctx)
@@ -111,7 +107,7 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 		return
 	}
 	cfg, _ := mapToStrings(ctx, plan.Config)
-	integration, err := r.client.UpdateWebhookIntegration(ctx, client.Integration{
+	integration, err := r.updateIntegration(ctx, client.Integration{
 		ID:        plan.ID.ValueString(),
 		ProjectID: plan.ProjectID.ValueString(),
 		Type:      plan.Type.ValueString(),
@@ -140,13 +136,13 @@ func (r *integrationResource) Delete(ctx context.Context, req resource.DeleteReq
 
 func (r *integrationResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	parts := strings.Split(req.ID, "/")
-	if len(parts) != 2 {
-		resp.Diagnostics.AddError("Invalid Import ID", "Use `project_id/channel_id`.")
+	if len(parts) != 3 {
+		resp.Diagnostics.AddError("Invalid Import ID", "Use `project_id/type/channel_id`.")
 		return
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("type"), "webhook")...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("type"), parts[1])...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[2])...)
 }
 
 func mapToStrings(ctx context.Context, m types.Map) (map[string]string, error) {
@@ -165,7 +161,9 @@ func applyIntegration(state *model, in *client.Integration) {
 	state.ID = types.StringValue(in.ID)
 	state.ProjectID = types.StringValue(in.ProjectID)
 	state.Type = types.StringValue(in.Type)
-	state.Name = types.StringValue(in.Name)
+	if !(state.Name.IsNull() && in.Name == "") {
+		state.Name = types.StringValue(in.Name)
+	}
 
 	keys := make([]string, 0, len(in.Config))
 	for key := range in.Config {
@@ -178,4 +176,37 @@ func applyIntegration(state *model, in *client.Integration) {
 		values[key] = types.StringValue(in.Config[key])
 	}
 	state.Config = types.MapValueMust(types.StringType, values)
+}
+
+func (r *integrationResource) createIntegration(ctx context.Context, in client.Integration) (*client.Integration, error) {
+	switch in.Type {
+	case "webhook":
+		return r.client.CreateWebhookIntegration(ctx, in)
+	case "email":
+		return r.client.CreateEmailIntegration(ctx, in)
+	default:
+		return nil, errors.New("unsupported integration type: only `webhook` and `email` are currently implemented")
+	}
+}
+
+func (r *integrationResource) getIntegration(ctx context.Context, projectID, channelID, integrationType string) (*client.Integration, error) {
+	switch integrationType {
+	case "webhook":
+		return r.client.GetWebhookIntegration(ctx, projectID, channelID)
+	case "email":
+		return r.client.GetEmailIntegration(ctx, projectID, channelID)
+	default:
+		return nil, errors.New("unsupported integration type: only `webhook` and `email` are currently implemented")
+	}
+}
+
+func (r *integrationResource) updateIntegration(ctx context.Context, in client.Integration) (*client.Integration, error) {
+	switch in.Type {
+	case "webhook":
+		return r.client.UpdateWebhookIntegration(ctx, in)
+	case "email":
+		return r.client.UpdateEmailIntegration(ctx, in)
+	default:
+		return nil, errors.New("unsupported integration type: only `webhook` and `email` are currently implemented")
+	}
 }

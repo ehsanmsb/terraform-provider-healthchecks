@@ -6,7 +6,7 @@ Terraform provider for [Healthchecks](https://github.com/healthchecks/healthchec
 
 - `healthchecks_project`
 - `healthchecks_check`
-- `healthchecks_integration` with initial `webhook` support
+- `healthchecks_integration` with `webhook` and `email` support
 - `healthchecks_project_member`
 
 Project resources can also manage project-level secrets and access toggles:
@@ -49,9 +49,9 @@ go test -v ./...
 
 ## TODO
 
+- Expand `healthchecks_integration` beyond `webhook` to additional Healthchecks integration types.
 - Add direct API key authentication to provider configuration.
 - Add richer acceptance tests with real CRUD coverage.
-- Add more integration kinds beyond webhooks.
 - Add first-class project data sources.
 - Improve import behavior so imported projects/checks do not need API-key regeneration.
 - Add acceptance coverage for project key enable/disable behavior.

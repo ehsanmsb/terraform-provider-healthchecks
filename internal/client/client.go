@@ -354,7 +354,7 @@ func (c *Client) DeleteProject(ctx context.Context, projectID string) error {
 		return err
 	}
 	defer res.Body.Close()
-	if res.StatusCode != http.StatusFound {
+	if res.StatusCode >= 400 {
 		return fmt.Errorf("delete project returned status %d", res.StatusCode)
 	}
 	return nil
@@ -636,6 +636,38 @@ func (c *Client) CreateWebhookIntegration(ctx context.Context, in Integration) (
 	return c.GetWebhookIntegration(ctx, in.ProjectID, last.ID)
 }
 
+func (c *Client) CreateEmailIntegration(ctx context.Context, in Integration) (*Integration, error) {
+	if err := c.Login(ctx); err != nil {
+		return nil, err
+	}
+
+	before, _ := c.ListChannels(ctx, in.ProjectID)
+	doc, err := c.getDocument(ctx, fmt.Sprintf("/projects/%s/add_email/", in.ProjectID))
+	if err != nil {
+		return nil, err
+	}
+	token, err := extractCSRFToken(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	values := emailConfigToFormValues(in.Config)
+	if _, _, err := c.postForm(ctx, fmt.Sprintf("/projects/%s/add_email/", in.ProjectID), values, token); err != nil {
+		return nil, err
+	}
+
+	after, err := c.ListChannels(ctx, in.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	created := diffChannels(before, after)
+	if len(created) == 0 {
+		return nil, errors.New("could not identify created email integration")
+	}
+	last := created[len(created)-1]
+	return c.GetEmailIntegration(ctx, in.ProjectID, last.ID)
+}
+
 func (c *Client) GetWebhookIntegration(ctx context.Context, projectID, channelID string) (*Integration, error) {
 	if err := c.Login(ctx); err != nil {
 		return nil, err
@@ -645,10 +677,16 @@ func (c *Client) GetWebhookIntegration(ctx context.Context, projectID, channelID
 		return nil, err
 	}
 	config := map[string]string{}
-	for _, field := range []string{"method_down", "url_down", "body_down", "headers_down", "method_up", "url_up", "body_up", "headers_up"} {
-		if value, ok := extractNamedFieldValue(doc, field); ok {
+	for _, field := range []string{"url_down", "body_down", "headers_down", "url_up", "body_up", "headers_up"} {
+		if value, ok := extractNamedFieldValue(doc, field); ok && strings.TrimSpace(value) != "" {
 			config[field] = value
 		}
+	}
+	if value, ok := extractNamedSelectValue(doc, "method_down"); ok {
+		config["method_down"] = value
+	}
+	if value, ok := extractNamedSelectValue(doc, "method_up"); ok {
+		config["method_up"] = value
 	}
 	name, _ := extractNamedFieldValue(doc, "name")
 	return &Integration{
@@ -656,6 +694,31 @@ func (c *Client) GetWebhookIntegration(ctx context.Context, projectID, channelID
 		ProjectID: projectID,
 		Type:      "webhook",
 		Name:      name,
+		Config:    config,
+	}, nil
+}
+
+func (c *Client) GetEmailIntegration(ctx context.Context, projectID, channelID string) (*Integration, error) {
+	if err := c.Login(ctx); err != nil {
+		return nil, err
+	}
+	doc, err := c.getDocument(ctx, fmt.Sprintf("/integrations/%s/edit/", channelID))
+	if err != nil {
+		return nil, err
+	}
+
+	config := map[string]string{}
+	if value, ok := extractNamedFieldValue(doc, "value"); ok && strings.TrimSpace(value) != "" {
+		config["value"] = value
+	}
+	config["up"] = boolString(extractNamedCheckboxValue(doc, "up"))
+	config["down"] = boolString(extractNamedCheckboxValue(doc, "down"))
+
+	return &Integration{
+		ID:        channelID,
+		ProjectID: projectID,
+		Type:      "email",
+		Name:      "",
 		Config:    config,
 	}, nil
 }
@@ -681,6 +744,26 @@ func (c *Client) UpdateWebhookIntegration(ctx context.Context, in Integration) (
 		return nil, err
 	}
 	return c.GetWebhookIntegration(ctx, in.ProjectID, in.ID)
+}
+
+func (c *Client) UpdateEmailIntegration(ctx context.Context, in Integration) (*Integration, error) {
+	if err := c.Login(ctx); err != nil {
+		return nil, err
+	}
+	doc, err := c.getDocument(ctx, fmt.Sprintf("/integrations/%s/edit/", in.ID))
+	if err != nil {
+		return nil, err
+	}
+	token, err := extractCSRFToken(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	values := emailConfigToFormValues(in.Config)
+	if _, _, err := c.postForm(ctx, fmt.Sprintf("/integrations/%s/edit/", in.ID), values, token); err != nil {
+		return nil, err
+	}
+	return c.GetEmailIntegration(ctx, in.ProjectID, in.ID)
 }
 
 func (c *Client) DeleteIntegration(ctx context.Context, integrationID string) error {
@@ -999,6 +1082,35 @@ func extractNamedFieldValue(doc *goquery.Document, name string) (string, bool) {
 	return strings.TrimSpace(selection.Text()), true
 }
 
+func extractNamedCheckboxValue(doc *goquery.Document, name string) bool {
+	selection := doc.Find(fmt.Sprintf(`[name="%s"]`, name)).First()
+	if selection.Length() == 0 {
+		return false
+	}
+	_, ok := selection.Attr("checked")
+	return ok
+}
+
+func extractNamedSelectValue(doc *goquery.Document, name string) (string, bool) {
+	selection := doc.Find(fmt.Sprintf(`select[name="%s"]`, name)).First()
+	if selection.Length() == 0 {
+		return "", false
+	}
+
+	selected := selection.Find("option[selected]").First()
+	if selected.Length() == 0 {
+		selected = selection.Find("option").First()
+	}
+	if selected.Length() == 0 {
+		return "", false
+	}
+
+	if value, ok := selected.Attr("value"); ok {
+		return strings.TrimSpace(value), true
+	}
+	return strings.TrimSpace(selected.Text()), true
+}
+
 func parseProjectKeyStates(doc *goquery.Document) map[string]projectKeyState {
 	out := map[string]projectKeyState{}
 
@@ -1094,6 +1206,9 @@ func normalizeProjectKeyLabel(label string) string {
 func findCreatedProjectKey(body string) string {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
 	if err == nil {
+		if value, ok := doc.Find(`#key-created-modal input[readonly]`).First().Attr("value"); ok {
+			return strings.TrimSpace(value)
+		}
 		if value, ok := doc.Find("#key-created-modal code[data-plaintext]").First().Attr("data-plaintext"); ok {
 			return strings.TrimSpace(value)
 		}
@@ -1104,7 +1219,7 @@ func findCreatedProjectKey(body string) string {
 			}
 		}
 	}
-	return regexp.MustCompile(`\b(?:hc[wr]_[A-Za-z0-9]{28}|[A-Za-z0-9]{20,64})\b`).FindString(body)
+	return ""
 }
 
 func diffChannels(before, after []Channel) []Channel {
@@ -1135,4 +1250,38 @@ func normalizeRoleLabel(role string) string {
 	default:
 		return role
 	}
+}
+
+func emailConfigToFormValues(config map[string]string) url.Values {
+	values := url.Values{}
+	if value := strings.TrimSpace(config["value"]); value != "" {
+		values.Set("value", value)
+	}
+	if parseBoolString(config["down"], true) {
+		values.Set("down", "on")
+	}
+	if parseBoolString(config["up"], true) {
+		values.Set("up", "on")
+	}
+	return values
+}
+
+func parseBoolString(v string, defaultValue bool) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "":
+		return defaultValue
+	case "1", "t", "true", "yes", "on":
+		return true
+	case "0", "f", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+func boolString(v bool) string {
+	if v {
+		return "true"
+	}
+	return "false"
 }

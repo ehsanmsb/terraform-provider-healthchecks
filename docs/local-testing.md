@@ -103,3 +103,21 @@ This focused example exercises:
 - `api_key_enabled`
 - `read_only_api_key_enabled`
 - `ping_key_enabled`
+
+## 6. Focused Project Integration Test
+
+Use [examples/project_integrations_smoke](/Users/snapp/Documents/Github/terraform-provider-healthchecks/examples/project_integrations_smoke/main.tf:1) to test a project with both supported integration types and a check wired to both:
+
+```bash
+cd examples/project_integrations_smoke
+TF_VAR_username=admin@example.test \
+TF_VAR_password=adminpass123 \
+TF_CLI_CONFIG_FILE=/path/to/dev.tfrc \
+terraform apply -parallelism=1
+```
+
+This focused example exercises:
+
+- `healthchecks_integration` with `type = "webhook"`
+- `healthchecks_integration` with `type = "email"`
+- `healthchecks_check.channels` attachment to both integrations

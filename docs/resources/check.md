@@ -10,7 +10,14 @@ resource "healthchecks_check" "job" {
   name       = "nightly-job"
   timeout    = 3600
   grace      = 300
+  channels   = [healthchecks_integration.webhook.id]
 }
+```
+
+To detach all integrations from a check, set:
+
+```hcl
+channels = []
 ```
 
 ## Schema
@@ -29,3 +36,9 @@ resource "healthchecks_check" "job" {
 - `uuid` (String, Computed)
 - `ping_url` (String, Computed)
 - `status` (String, Computed)
+
+## Notes
+
+- `channels` accepts Healthchecks channel IDs.
+- In the current provider, the most practical way to test channel attachment is to create a `healthchecks_integration` of `type = "webhook"` and reference its `id`.
+- To disable integrations for a check, update `channels` to an empty list.

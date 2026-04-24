@@ -1,6 +1,6 @@
 # Resource: healthchecks_integration
 
-Manages a Healthchecks integration. The initial implementation supports `type = "webhook"` through the Healthchecks web UI endpoints.
+Manages a Healthchecks integration. The current implementation supports `type = "webhook"` and `type = "email"` through the Healthchecks web UI endpoints.
 
 ## Example
 
@@ -19,6 +19,29 @@ resource "healthchecks_integration" "webhook" {
 }
 ```
 
+```hcl
+resource "healthchecks_integration" "email" {
+  project_id = healthchecks_project.example.id
+  type       = "email"
+
+  config = {
+    value = "alerts@example.com"
+    down  = "true"
+    up    = "false"
+  }
+}
+```
+
+Attach the created integration to a check:
+
+```hcl
+resource "healthchecks_check" "job" {
+  project_id = healthchecks_project.example.id
+  name       = "nightly-job"
+  channels   = [healthchecks_integration.webhook.id]
+}
+```
+
 ## Schema
 
 - `project_id` (String, Required)
@@ -26,3 +49,10 @@ resource "healthchecks_integration" "webhook" {
 - `name` (String, Optional)
 - `config` (Map of String, Required)
 - `id` (String, Computed)
+
+## Notes
+
+- Supported types today: `webhook`, `email`.
+- Check-level integration enable/disable is controlled through `healthchecks_check.channels`.
+- Removing a channel ID from `channels`, or setting `channels = []`, disables that integration for the check.
+- For `type = "email"`, `config.value` is the destination email address and `config.up` / `config.down` control which state changes send alerts.

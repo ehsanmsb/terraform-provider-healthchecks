@@ -3,6 +3,7 @@ package check
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -206,7 +207,7 @@ func applyCheckToState(state *model, check *client.Check) {
 		state.TZ = types.StringValue(*check.TZ)
 	}
 	state.Tags = splitSpaceList(check.Tags)
-	state.Channels = splitCommaList(check.Channels)
+	state.Channels = normalizeChannels(state.Channels, check.Channels)
 }
 
 func splitSpaceList(v string) types.List {
@@ -231,4 +232,63 @@ func splitCommaList(v string) types.List {
 		values = append(values, types.StringValue(strings.TrimSpace(part)))
 	}
 	return types.ListValueMust(types.StringType, values)
+}
+
+func normalizeChannels(current types.List, raw string) types.List {
+	if strings.TrimSpace(raw) == "" {
+		return types.ListValueMust(types.StringType, nil)
+	}
+
+	server := splitCommaStrings(raw)
+	if !current.IsNull() && current.Elements() != nil {
+		var existing []string
+		_ = current.ElementsAs(context.Background(), &existing, false)
+		if sameStringSet(existing, server) {
+			return current
+		}
+	}
+
+	slices.Sort(server)
+	values := make([]attr.Value, 0, len(server))
+	for _, part := range server {
+		values = append(values, types.StringValue(part))
+	}
+	return types.ListValueMust(types.StringType, values)
+}
+
+func splitCommaStrings(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	counts := map[string]int{}
+	for _, item := range a {
+		counts[item]++
+	}
+	for _, item := range b {
+		counts[item]--
+		if counts[item] < 0 {
+			return false
+		}
+	}
+	for _, count := range counts {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }
