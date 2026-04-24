@@ -87,3 +87,7 @@ go test -v ./...
 - Add first-class project data sources.
 - Improve import behavior so imported projects/checks do not need API-key regeneration.
 - Add acceptance coverage for project key enable/disable behavior.
+
+## Roadmap
+
+See [docs/roadmap.md](docs/roadmap.md) for a more structured list of candidate enhancements that can be turned into GitHub issues.

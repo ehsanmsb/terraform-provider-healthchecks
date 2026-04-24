@@ -1,0 +1,95 @@
+name: Bug report
+description: Report a provider bug, regression, or unexpected behavior
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please share enough detail for us to reproduce the problem safely.
+
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: Short description of the problem
+      placeholder: healthchecks_check update fails when channels are reordered
+    validations:
+      required: true
+
+  - type: textarea
+    id: terraform_config
+    attributes:
+      label: Terraform configuration
+      description: Minimal configuration needed to reproduce the bug
+      render: hcl
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed_behavior
+    attributes:
+      label: Actual behavior
+      description: What happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      description: Paste Terraform/provider errors here. Remove secrets before submitting.
+      render: text
+
+  - type: input
+    id: provider_version
+    attributes:
+      label: Provider version
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: terraform_version
+    attributes:
+      label: Terraform version
+      placeholder: 1.14.9
+    validations:
+      required: true
+
+  - type: input
+    id: healthchecks_version
+    attributes:
+      label: Healthchecks version
+      description: Upstream or self-hosted version/commit if known
+      placeholder: v4.1.1 or commit SHA
+
+  - type: dropdown
+    id: deployment_type
+    attributes:
+      label: Healthchecks deployment type
+      options:
+        - Self-hosted
+        - healthchecks.io
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Confirmations
+      options:
+        - label: I removed passwords, API keys, cookies, CSRF tokens, and session identifiers from this report
+          required: true
+        - label: I searched existing issues before opening this report
+          required: true
