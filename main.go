@@ -9,6 +9,11 @@ import (
 	"github.com/ehsanmsb/terraform-provider-healthchecks/internal/provider"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+)
+
 func main() {
 	opts := providerserver.ServeOpts{
 		Address: "registry.terraform.io/ehsanmsb/healthchecks",

@@ -25,6 +25,23 @@ go test ./...
 go build ./...
 ```
 
+## Releases
+
+This repository uses Semantic Versioning and semantic commits.
+
+- Use commit messages such as `feat: ...`, `fix: ...`, `docs: ...`, and `chore: ...`
+- `release-please` watches `main` and prepares the next version from commit history
+- pushing a tag like `v0.1.0` triggers GoReleaser to build release artifacts and publish a GitHub release
+
+The repository includes:
+
+- `.github/workflows/release-please.yml` for semantic version automation
+- `.github/workflows/release.yml` for tagged releases
+- `.goreleaser.yml` for provider build artifacts
+- `terraform-registry-manifest.json` for Terraform Registry metadata
+
+Note: publishing to the public Terraform Registry also requires signed release checksums and an uploaded public GPG key in the Registry settings.
+
 ## Acceptance tests
 
 Set:
