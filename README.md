@@ -25,6 +25,21 @@ go test ./...
 go build ./...
 ```
 
+## CI
+
+GitHub Actions runs the `CI` workflow on pull requests and pushes to `main`.
+
+The workflow verifies:
+
+- `gofmt`
+- `go vet`
+- `go test ./...`
+- `go build ./...`
+
+If you protect `main`, a good required status check is:
+
+- `Quality`
+
 ## Releases
 
 This repository uses Semantic Versioning and semantic commits.
