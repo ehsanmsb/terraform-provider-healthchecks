@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -137,6 +136,12 @@ func (c *Client) RememberProjectAPIKey(projectID, apiKey string) {
 	c.projectAPIKeys[projectID] = apiKey
 }
 
+func (c *Client) ForgetProjectAPIKey(projectID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.projectAPIKeys, projectID)
+}
+
 func (c *Client) Login(ctx context.Context) error {
 	c.mu.Lock()
 	if c.loggedIn {
@@ -198,19 +203,15 @@ func (c *Client) CreateProject(ctx context.Context, name string) (*Project, erro
 	}
 
 	values := url.Values{"name": {name}}
-	res, _, err := c.postForm(ctx, "/projects/add/", values, token)
+	res, body, err := c.postForm(ctx, "/projects/add/", values, token)
 	if err != nil {
 		return nil, err
 	}
 	defer res.Body.Close()
 
-	if res.StatusCode != http.StatusFound {
-		return nil, fmt.Errorf("create project returned status %d", res.StatusCode)
-	}
-
-	projectID, err := projectIDFromLocation(res.Header.Get("Location"))
+	projectID, err := projectIDFromResponse(res, body)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create project returned status %d: %w", res.StatusCode, err)
 	}
 
 	project, err := c.GetProject(ctx, projectID, "")
@@ -364,48 +365,39 @@ func (c *Client) EnsureProjectAPIKey(ctx context.Context, projectID string) (str
 }
 
 func (c *Client) GetCheck(ctx context.Context, projectID, checkID string) (*Check, error) {
-	apiKey, err := c.EnsureProjectAPIKey(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-
 	var resp Check
-	if err := c.apiJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, nil, &resp); err != nil {
+	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+		return c.apiJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, nil, &resp)
+	}); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
 func (c *Client) CreateCheck(ctx context.Context, projectID string, payload map[string]any) (*Check, error) {
-	apiKey, err := c.EnsureProjectAPIKey(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
 	var wrapper Check
-	if err := c.apiJSON(ctx, http.MethodPost, "/api/v3/checks/", apiKey, payload, &wrapper); err != nil {
+	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+		return c.apiJSON(ctx, http.MethodPost, "/api/v3/checks/", apiKey, payload, &wrapper)
+	}); err != nil {
 		return nil, err
 	}
 	return &wrapper, nil
 }
 
 func (c *Client) UpdateCheck(ctx context.Context, projectID, checkID string, payload map[string]any) (*Check, error) {
-	apiKey, err := c.EnsureProjectAPIKey(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
 	var check Check
-	if err := c.apiJSON(ctx, http.MethodPost, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, payload, &check); err != nil {
+	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+		return c.apiJSON(ctx, http.MethodPost, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, payload, &check)
+	}); err != nil {
 		return nil, err
 	}
 	return &check, nil
 }
 
 func (c *Client) DeleteCheck(ctx context.Context, projectID, checkID string) error {
-	apiKey, err := c.EnsureProjectAPIKey(ctx, projectID)
-	if err != nil {
-		return err
-	}
-	if err := c.apiJSON(ctx, http.MethodDelete, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, nil, nil); err != nil {
+	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+		return c.apiJSON(ctx, http.MethodDelete, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, nil, nil)
+	}); err != nil {
 		if errors.Is(err, errNotFound) {
 			return nil
 		}
@@ -415,17 +407,35 @@ func (c *Client) DeleteCheck(ctx context.Context, projectID, checkID string) err
 }
 
 func (c *Client) ListChannels(ctx context.Context, projectID string) ([]Channel, error) {
-	apiKey, err := c.EnsureProjectAPIKey(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
 	var resp struct {
 		Channels []Channel `json:"channels"`
 	}
-	if err := c.apiJSON(ctx, http.MethodGet, "/api/v3/channels/", apiKey, nil, &resp); err != nil {
+	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+		return c.apiJSON(ctx, http.MethodGet, "/api/v3/channels/", apiKey, nil, &resp)
+	}); err != nil {
 		return nil, err
 	}
 	return resp.Channels, nil
+}
+
+func (c *Client) withProjectAPIKeyRetry(ctx context.Context, projectID string, fn func(apiKey string) error) error {
+	apiKey, err := c.EnsureProjectAPIKey(ctx, projectID)
+	if err != nil {
+		return err
+	}
+
+	err = fn(apiKey)
+	if !errors.Is(err, errUnauthorized) {
+		return err
+	}
+
+	c.ForgetProjectAPIKey(projectID)
+	apiKey, err = c.EnsureProjectAPIKey(ctx, projectID)
+	if err != nil {
+		return err
+	}
+
+	return fn(apiKey)
 }
 
 func (c *Client) CreateWebhookIntegration(ctx context.Context, in Integration) (*Integration, error) {
@@ -753,9 +763,14 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 
 func (c *Client) resolveURL(p string) *url.URL {
 	out := *c.baseURL
-	out.Path = path.Join(c.baseURL.Path, p)
-	if !strings.HasPrefix(p, "/") {
-		out.Path = path.Join(c.baseURL.Path, "/"+p)
+	basePath := strings.TrimRight(c.baseURL.Path, "/")
+	reqPath := p
+	if !strings.HasPrefix(reqPath, "/") {
+		reqPath = "/" + reqPath
+	}
+	out.Path = basePath + reqPath
+	if out.Path == "" {
+		out.Path = "/"
 	}
 	return &out
 }
@@ -770,6 +785,37 @@ func projectIDFromLocation(location string) (string, error) {
 		return "", fmt.Errorf("could not parse project id from redirect %q", location)
 	}
 	return matches[1], nil
+}
+
+func projectIDFromBody(body string) (string, error) {
+	matches := regexp.MustCompile(`/projects/([0-9a-f-]+)/`).FindStringSubmatch(body)
+	if len(matches) == 2 {
+		return matches[1], nil
+	}
+
+	return "", errors.New("could not determine project id from response body")
+}
+
+func projectIDFromResponse(res *http.Response, body string) (string, error) {
+	if location := res.Header.Get("Location"); location != "" {
+		if id, err := projectIDFromLocation(location); err == nil {
+			return id, nil
+		}
+	}
+
+	if res.Request != nil && res.Request.URL != nil {
+		if id, err := projectIDFromLocation(res.Request.URL.String()); err == nil {
+			return id, nil
+		}
+	}
+
+	if body != "" {
+		if id, err := projectIDFromBody(body); err == nil {
+			return id, nil
+		}
+	}
+
+	return "", errors.New("could not determine project id from response")
 }
 
 func extractCSRFToken(doc *goquery.Document) (string, error) {

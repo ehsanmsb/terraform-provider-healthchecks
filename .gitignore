@@ -1,3 +1,7 @@
 .gocache/
 .gomodcache/
 .terraform/
+.dist/
+*.tfstate
+*.tfstate.backup
+*.tfvars

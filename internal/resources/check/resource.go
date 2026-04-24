@@ -190,7 +190,9 @@ func applyCheckToState(state *model, check *client.Check) {
 	state.UUID = types.StringValue(check.ID)
 	state.Name = types.StringValue(check.Name)
 	state.Slug = types.StringValue(check.Slug)
-	state.Desc = types.StringValue(check.Desc)
+	if !(state.Desc.IsNull() && check.Desc == "") {
+		state.Desc = types.StringValue(check.Desc)
+	}
 	state.Grace = types.Int64Value(check.Grace)
 	state.Status = types.StringValue(check.Status)
 	state.PingURL = types.StringValue(check.PingURL)
