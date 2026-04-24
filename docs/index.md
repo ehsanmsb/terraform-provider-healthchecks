@@ -18,3 +18,11 @@ provider "healthchecks" {
 ```
 
 See the `examples/` directory for end-to-end usage.
+
+Project support includes sensitive computed attributes for:
+
+- read-write API key
+- read-only API key
+- ping key
+
+and boolean toggles for enabling or revoking those keys from Terraform.

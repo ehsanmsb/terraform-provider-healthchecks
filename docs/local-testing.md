@@ -71,12 +71,13 @@ Use the example in [examples/local_smoke](/Users/snapp/Documents/Github/terrafor
 
 ```bash
 cd examples/local_smoke
-TF_CLI_CONFIG_FILE=/path/to/dev.tfrc terraform init
 TF_VAR_username=admin@example.test \
 TF_VAR_password=adminpass123 \
 TF_CLI_CONFIG_FILE=/path/to/dev.tfrc \
 terraform apply
 ```
+
+When using Terraform `dev_overrides`, you can skip `terraform init`.
 
 This exercises:
 
@@ -84,3 +85,21 @@ This exercises:
 - `healthchecks_check`
 - `healthchecks_integration` with `webhook`
 - `healthchecks_project_member`
+
+## 5. Focused Project Key Test
+
+Use [examples/project_keys_smoke](/Users/snapp/Documents/Github/terraform-provider-healthchecks/examples/project_keys_smoke/main.tf:1) to test just project key creation and toggling:
+
+```bash
+cd examples/project_keys_smoke
+TF_VAR_username=admin@example.test \
+TF_VAR_password=adminpass123 \
+TF_CLI_CONFIG_FILE=/path/to/dev.tfrc \
+terraform apply
+```
+
+This focused example exercises:
+
+- `api_key_enabled`
+- `read_only_api_key_enabled`
+- `ping_key_enabled`

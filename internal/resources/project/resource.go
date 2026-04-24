@@ -26,10 +26,14 @@ type projectResource struct {
 }
 
 type model struct {
-	ID            types.String `tfsdk:"id"`
-	Name          types.String `tfsdk:"name"`
-	APIKey        types.String `tfsdk:"api_key"`
-	APIKeyEnabled types.Bool   `tfsdk:"api_key_enabled"`
+	ID                    types.String `tfsdk:"id"`
+	Name                  types.String `tfsdk:"name"`
+	APIKey                types.String `tfsdk:"api_key"`
+	APIKeyEnabled         types.Bool   `tfsdk:"api_key_enabled"`
+	ReadOnlyAPIKey        types.String `tfsdk:"read_only_api_key"`
+	ReadOnlyAPIKeyEnabled types.Bool   `tfsdk:"read_only_api_key_enabled"`
+	PingKey               types.String `tfsdk:"ping_key"`
+	PingKeyEnabled        types.Bool   `tfsdk:"ping_key_enabled"`
 }
 
 func (r *projectResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -50,6 +54,24 @@ func (r *projectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Optional: true,
 				Computed: true,
 				Default:  booldefault.StaticBool(true),
+			},
+			"read_only_api_key": schema.StringAttribute{
+				Computed:  true,
+				Sensitive: true,
+			},
+			"read_only_api_key_enabled": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
+			},
+			"ping_key": schema.StringAttribute{
+				Computed:  true,
+				Sensitive: true,
+			},
+			"ping_key_enabled": schema.BoolAttribute{
+				Optional: true,
+				Computed: true,
+				Default:  booldefault.StaticBool(false),
 			},
 		},
 	}
@@ -73,12 +95,14 @@ func (r *projectResource) Create(ctx context.Context, req resource.CreateRequest
 		resp.Diagnostics.AddError("Unable to Create Project", err.Error())
 		return
 	}
-	state := model{
-		ID:            types.StringValue(project.ID),
-		Name:          types.StringValue(project.Name),
-		APIKey:        types.StringValue(project.APIKey),
-		APIKeyEnabled: types.BoolValue(project.APIKeyEnabled),
+
+	project, err = r.reconcileProjectKeys(ctx, project.ID, plan, project)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Configure Project Keys", err.Error())
+		return
 	}
+
+	state := newProjectModel(plan, project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -89,7 +113,13 @@ func (r *projectResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	project, err := r.client.GetProject(ctx, state.ID.ValueString(), state.APIKey.ValueString())
+	project, err := r.client.GetProject(
+		ctx,
+		state.ID.ValueString(),
+		state.APIKey.ValueString(),
+		state.ReadOnlyAPIKey.ValueString(),
+		state.PingKey.ValueString(),
+	)
 	if err != nil {
 		if errors.Is(err, client.ErrNotFound()) {
 			resp.State.RemoveResource(ctx)
@@ -98,17 +128,7 @@ func (r *projectResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.Diagnostics.AddError("Unable to Read Project", err.Error())
 		return
 	}
-	if state.APIKey.IsNull() || state.APIKey.ValueString() == "" {
-		if key, err := r.client.EnsureProjectAPIKey(ctx, state.ID.ValueString()); err == nil {
-			project.APIKey = key
-			project.APIKeyEnabled = true
-		}
-	}
-	state.Name = types.StringValue(project.Name)
-	state.APIKeyEnabled = types.BoolValue(project.APIKeyEnabled)
-	if project.APIKey != "" {
-		state.APIKey = types.StringValue(project.APIKey)
-	}
+	state = newProjectModel(state, project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -125,8 +145,12 @@ func (r *projectResource) Update(ctx context.Context, req resource.UpdateRequest
 		resp.Diagnostics.AddError("Unable to Update Project", err.Error())
 		return
 	}
-	state.Name = types.StringValue(project.Name)
-	state.APIKeyEnabled = plan.APIKeyEnabled
+	project, err = r.reconcileProjectKeys(ctx, state.ID.ValueString(), plan, project)
+	if err != nil {
+		resp.Diagnostics.AddError("Unable to Configure Project Keys", err.Error())
+		return
+	}
+	state = newProjectModel(plan, project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -143,4 +167,68 @@ func (r *projectResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 func (r *projectResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+func (r *projectResource) reconcileProjectKeys(ctx context.Context, projectID string, desired model, current *client.Project) (*client.Project, error) {
+	if current == nil {
+		current = &client.Project{ID: projectID}
+	}
+
+	apiKey, err := r.client.SetProjectKeyEnabled(ctx, projectID, "api_key", desired.APIKeyEnabled.ValueBool())
+	if err != nil {
+		return nil, err
+	}
+	current.APIKeyEnabled = desired.APIKeyEnabled.ValueBool()
+	current.APIKey = apiKey
+
+	readOnlyKey, err := r.client.SetProjectKeyEnabled(ctx, projectID, "read_only_api_key", desired.ReadOnlyAPIKeyEnabled.ValueBool())
+	if err != nil {
+		return nil, err
+	}
+	current.ReadOnlyAPIKeyEnabled = desired.ReadOnlyAPIKeyEnabled.ValueBool()
+	current.ReadOnlyAPIKey = readOnlyKey
+
+	pingKey, err := r.client.SetProjectKeyEnabled(ctx, projectID, "ping_key", desired.PingKeyEnabled.ValueBool())
+	if err != nil {
+		return nil, err
+	}
+	current.PingKeyEnabled = desired.PingKeyEnabled.ValueBool()
+	current.PingKey = pingKey
+
+	return r.client.GetProject(ctx, projectID, current.APIKey, current.ReadOnlyAPIKey, current.PingKey)
+}
+
+func newProjectModel(previous model, project *client.Project) model {
+	state := previous
+	state.ID = types.StringValue(project.ID)
+	state.Name = types.StringValue(project.Name)
+	state.APIKeyEnabled = types.BoolValue(project.APIKeyEnabled)
+	state.ReadOnlyAPIKeyEnabled = types.BoolValue(project.ReadOnlyAPIKeyEnabled)
+	state.PingKeyEnabled = types.BoolValue(project.PingKeyEnabled)
+
+	if project.APIKeyEnabled {
+		if project.APIKey != "" {
+			state.APIKey = types.StringValue(project.APIKey)
+		}
+	} else {
+		state.APIKey = types.StringNull()
+	}
+
+	if project.ReadOnlyAPIKeyEnabled {
+		if project.ReadOnlyAPIKey != "" {
+			state.ReadOnlyAPIKey = types.StringValue(project.ReadOnlyAPIKey)
+		}
+	} else {
+		state.ReadOnlyAPIKey = types.StringNull()
+	}
+
+	if project.PingKeyEnabled {
+		if project.PingKey != "" {
+			state.PingKey = types.StringValue(project.PingKey)
+		}
+	} else {
+		state.PingKey = types.StringNull()
+	}
+
+	return state
 }

@@ -3,7 +3,10 @@ package client
 import (
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 func TestProjectIDFromLocation(t *testing.T) {
@@ -17,7 +20,7 @@ func TestProjectIDFromLocation(t *testing.T) {
 }
 
 func TestFindKeyCreated(t *testing.T) {
-	key := findKeyCreated(`<div id="key-created-modal">hcw_ABCDEF1234567890123456789012</div>`)
+	key := findCreatedProjectKey(`<div id="key-created-modal">hcw_ABCDEF1234567890123456789012</div>`)
 	if key != "hcw_ABCDEF1234567890123456789012" {
 		t.Fatalf("unexpected key: %q", key)
 	}
@@ -73,4 +76,66 @@ func TestResolveURLPreservesTrailingSlash(t *testing.T) {
 	if got != "http://localhost:8000/accounts/login/" {
 		t.Fatalf("unexpected url: %s", got)
 	}
+}
+
+func TestParseProjectKeyStates(t *testing.T) {
+	doc := docFromString(t, `
+		<table id="api-keys">
+			<tr>
+				<td>API key</td>
+				<td><code data-plaintext="hcw_ABCDEFGHIJKLMNOPQRSTUVWXYZ12"></code></td>
+				<td><a data-revoke-key="api_key">Revoke</a></td>
+			</tr>
+			<tr>
+				<td>API key (read-only)</td>
+				<td><span class="not-set">not set</span></td>
+				<td><a data-create-key="api_key_readonly">Create</a></td>
+			</tr>
+			<tr>
+				<td>Ping key</td>
+				<td>1fj9XWM6Ns8vLGTmnPGk9g</td>
+				<td><a data-revoke-key="ping_key">Revoke</a></td>
+			</tr>
+		</table>
+	`)
+
+	got := parseProjectKeyStates(doc)
+
+	if !got[projectKeyAPIKey].Enabled {
+		t.Fatalf("expected api key enabled")
+	}
+	if got[projectKeyAPIKey].Plaintext != "hcw_ABCDEFGHIJKLMNOPQRSTUVWXYZ12" {
+		t.Fatalf("unexpected plaintext: %q", got[projectKeyAPIKey].Plaintext)
+	}
+	if got[projectKeyReadOnlyAPIKey].Enabled {
+		t.Fatalf("expected read-only api key disabled")
+	}
+	if got[projectKeyReadOnlyAPIKey].CreateValues.Get("create_key") != "api_key_readonly" {
+		t.Fatalf("unexpected read-only create values: %#v", got[projectKeyReadOnlyAPIKey].CreateValues)
+	}
+	if !got[projectKeyPingKey].Enabled {
+		t.Fatalf("expected ping key enabled")
+	}
+	if got[projectKeyPingKey].RevokeValues.Get("revoke_key") != "ping_key" {
+		t.Fatalf("unexpected ping revoke values: %#v", got[projectKeyPingKey].RevokeValues)
+	}
+}
+
+func TestFindCreatedProjectKeyPingKey(t *testing.T) {
+	body := `<div id="key-created-modal">1fj9XWM6Ns8vLGTmnPGk9g</div>`
+	got := findCreatedProjectKey(body)
+	if got != "1fj9XWM6Ns8vLGTmnPGk9g" {
+		t.Fatalf("unexpected key: %q", got)
+	}
+}
+
+func docFromString(t *testing.T, body string) *goquery.Document {
+	t.Helper()
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new document: %v", err)
+	}
+
+	return doc
 }

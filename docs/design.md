@@ -8,9 +8,10 @@ Relevant routes and behaviors:
 - Project create: `POST /projects/add/` with `name`.
 - Project settings/read/update/team/API key page: `GET|POST /projects/<uuid:code>/settings/`.
 - Project delete: `POST /projects/<uuid:code>/remove/`.
-- RW API key create/revoke via project settings form:
-  - `create_key=api_key`
-  - `revoke_key=api_key`
+- Project key management happens on the project settings page.
+  - Confirmed form fields: `create_key=api_key`, `revoke_key=api_key`
+  - Read-only API key and Ping key are also managed from the same settings table.
+  - The provider parses the current settings page to discover the create/revoke form fields for these additional keys instead of hardcoding undocumented names.
 - Team members managed on the same project settings form:
   - invite: `invite_team_member=1`, `email`, `role`
   - remove: `remove_team_member=1`, `email`
@@ -29,3 +30,4 @@ Implementation note:
 - Checks use the public Management API v3.
 - Projects, integrations, and project members use authenticated web forms because upstream does not currently expose equivalent public project-management endpoints.
 - The provider may generate a new project RW API key when it cannot recover a plaintext key from state or the current response body. This is necessary because Healthchecks stores hashed API keys server-side.
+- Read-only API keys and Ping keys are treated as sensitive Terraform attributes as well, but the provider does not expose them in example outputs by default.

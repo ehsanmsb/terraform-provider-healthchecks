@@ -49,10 +49,27 @@ type Client struct {
 }
 
 type Project struct {
-	ID            string
-	Name          string
-	APIKey        string
-	APIKeyEnabled bool
+	ID                    string
+	Name                  string
+	APIKey                string
+	APIKeyEnabled         bool
+	ReadOnlyAPIKey        string
+	ReadOnlyAPIKeyEnabled bool
+	PingKey               string
+	PingKeyEnabled        bool
+}
+
+const (
+	projectKeyAPIKey         = "api_key"
+	projectKeyReadOnlyAPIKey = "read_only_api_key"
+	projectKeyPingKey        = "ping_key"
+)
+
+type projectKeyState struct {
+	Enabled      bool
+	Plaintext    string
+	CreateValues url.Values
+	RevokeValues url.Values
 }
 
 type Check struct {
@@ -181,6 +198,9 @@ func (c *Client) Login(ctx context.Context) error {
 	if strings.Contains(body, "/accounts/login/two_factor/") || strings.Contains(body, "login_webauthn") || strings.Contains(body, "login_totp") {
 		return errUnexpectedAuth
 	}
+	if (res.Request != nil && res.Request.URL != nil && strings.HasSuffix(res.Request.URL.Path, "/accounts/login/")) || strings.Contains(body, `id="login-form"`) {
+		return errUnauthorized
+	}
 
 	c.mu.Lock()
 	c.loggedIn = true
@@ -214,7 +234,7 @@ func (c *Client) CreateProject(ctx context.Context, name string) (*Project, erro
 		return nil, fmt.Errorf("create project returned status %d: %w", res.StatusCode, err)
 	}
 
-	project, err := c.GetProject(ctx, projectID, "")
+	project, err := c.GetProject(ctx, projectID, "", "", "")
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +248,7 @@ func (c *Client) CreateProject(ctx context.Context, name string) (*Project, erro
 	return project, nil
 }
 
-func (c *Client) GetProject(ctx context.Context, projectID, stateAPIKey string) (*Project, error) {
+func (c *Client) GetProject(ctx context.Context, projectID, stateAPIKey, stateReadOnlyAPIKey, statePingKey string) (*Project, error) {
 	if err := c.Login(ctx); err != nil {
 		return nil, err
 	}
@@ -241,36 +261,48 @@ func (c *Client) GetProject(ctx context.Context, projectID, stateAPIKey string) 
 		return nil, err
 	}
 
-	project := &Project{
-		ID:   projectID,
-		Name: strings.TrimSpace(doc.Find("div.panel-body.settings-block").First().Text()),
-		APIKeyEnabled: doc.Find(`#api-keys tr td:first-child`).FilterFunction(func(i int, s *goquery.Selection) bool {
-			return strings.TrimSpace(s.Text()) == "API key"
-		}).Length() > 0,
-	}
+	project := &Project{ID: projectID, Name: strings.TrimSpace(doc.Find("div.panel-body.settings-block").First().Text())}
 
 	project.Name = strings.TrimSpace(doc.Find("div.panel-body.settings-block").First().Contents().Not("h2,a").Text())
 	if project.Name == "" {
 		project.Name = strings.TrimSpace(doc.Find("title").Text())
 	}
 
-	if cached := c.cachedProjectAPIKey(projectID); cached != "" {
-		project.APIKey = cached
-		project.APIKeyEnabled = true
-		return project, nil
-	}
-	if stateAPIKey != "" {
-		c.RememberProjectAPIKey(projectID, stateAPIKey)
-		project.APIKey = stateAPIKey
-		project.APIKeyEnabled = true
-		return project, nil
+	keys := parseProjectKeyStates(doc)
+
+	if key, ok := keys[projectKeyAPIKey]; ok {
+		project.APIKeyEnabled = key.Enabled
+		if key.Plaintext != "" {
+			project.APIKey = key.Plaintext
+			c.RememberProjectAPIKey(projectID, key.Plaintext)
+		} else if key.Enabled {
+			if cached := c.cachedProjectAPIKey(projectID); cached != "" {
+				project.APIKey = cached
+			} else if stateAPIKey != "" {
+				project.APIKey = stateAPIKey
+				c.RememberProjectAPIKey(projectID, stateAPIKey)
+			}
+		}
+	} else {
+		c.ForgetProjectAPIKey(projectID)
 	}
 
-	plaintext := findPlaintextAPIKey(doc)
-	if plaintext != "" {
-		project.APIKey = plaintext
-		project.APIKeyEnabled = true
-		c.RememberProjectAPIKey(projectID, plaintext)
+	if key, ok := keys[projectKeyReadOnlyAPIKey]; ok {
+		project.ReadOnlyAPIKeyEnabled = key.Enabled
+		if key.Plaintext != "" {
+			project.ReadOnlyAPIKey = key.Plaintext
+		} else if key.Enabled {
+			project.ReadOnlyAPIKey = stateReadOnlyAPIKey
+		}
+	}
+
+	if key, ok := keys[projectKeyPingKey]; ok {
+		project.PingKeyEnabled = key.Enabled
+		if key.Plaintext != "" {
+			project.PingKey = key.Plaintext
+		} else if key.Enabled {
+			project.PingKey = statePingKey
+		}
 	}
 
 	return project, nil
@@ -296,7 +328,7 @@ func (c *Client) UpdateProject(ctx context.Context, projectID, name string) (*Pr
 	if _, _, err := c.postForm(ctx, projectSettingsPath(projectID), values, token); err != nil {
 		return nil, err
 	}
-	return c.GetProject(ctx, projectID, c.cachedProjectAPIKey(projectID))
+	return c.GetProject(ctx, projectID, c.cachedProjectAPIKey(projectID), "", "")
 }
 
 func (c *Client) DeleteProject(ctx context.Context, projectID string) error {
@@ -332,6 +364,51 @@ func (c *Client) EnsureProjectAPIKey(ctx context.Context, projectID string) (str
 	if cached := c.cachedProjectAPIKey(projectID); cached != "" {
 		return cached, nil
 	}
+	key, err := c.ensureProjectKey(ctx, projectID, projectKeyAPIKey)
+	if err != nil {
+		return "", err
+	}
+	c.RememberProjectAPIKey(projectID, key)
+	return key, nil
+}
+
+func (c *Client) EnsureProjectReadOnlyAPIKey(ctx context.Context, projectID string) (string, error) {
+	return c.ensureProjectKey(ctx, projectID, projectKeyReadOnlyAPIKey)
+}
+
+func (c *Client) EnsureProjectPingKey(ctx context.Context, projectID string) (string, error) {
+	return c.ensureProjectKey(ctx, projectID, projectKeyPingKey)
+}
+
+func (c *Client) SetProjectKeyEnabled(ctx context.Context, projectID, keyName string, enabled bool) (string, error) {
+	if enabled {
+		switch keyName {
+		case projectKeyAPIKey:
+			return c.EnsureProjectAPIKey(ctx, projectID)
+		case projectKeyReadOnlyAPIKey:
+			return c.EnsureProjectReadOnlyAPIKey(ctx, projectID)
+		case projectKeyPingKey:
+			return c.EnsureProjectPingKey(ctx, projectID)
+		default:
+			return "", fmt.Errorf("unsupported project key %q", keyName)
+		}
+	}
+
+	if err := c.toggleProjectKey(ctx, projectID, keyName, false); err != nil {
+		return "", err
+	}
+	if keyName == projectKeyAPIKey {
+		c.ForgetProjectAPIKey(projectID)
+	}
+	return "", nil
+}
+
+func (c *Client) ensureProjectKey(ctx context.Context, projectID, keyName string) (string, error) {
+	if keyName == projectKeyAPIKey {
+		if cached := c.cachedProjectAPIKey(projectID); cached != "" {
+			return cached, nil
+		}
+	}
 	if err := c.Login(ctx); err != nil {
 		return "", err
 	}
@@ -340,28 +417,114 @@ func (c *Client) EnsureProjectAPIKey(ctx context.Context, projectID string) (str
 	if err != nil {
 		return "", err
 	}
-	if plaintext := findPlaintextAPIKey(doc); plaintext != "" {
-		c.RememberProjectAPIKey(projectID, plaintext)
-		return plaintext, nil
+	keys := parseProjectKeyStates(doc)
+	keyState, ok := keys[keyName]
+	if ok && keyState.Plaintext != "" {
+		return keyState.Plaintext, nil
+	}
+	if keyName == projectKeyAPIKey && ok && keyState.Enabled {
+		if cached := c.cachedProjectAPIKey(projectID); cached != "" {
+			return cached, nil
+		}
+	}
+
+	if ok && !keyState.Enabled {
+		return c.submitProjectKeyAction(ctx, projectID, doc, keyState.CreateValues)
+	}
+	if ok && len(keyState.CreateValues) > 0 {
+		return c.submitProjectKeyAction(ctx, projectID, doc, keyState.CreateValues)
+	}
+	if ok && keyState.Enabled && len(keyState.RevokeValues) > 0 {
+		if err := c.toggleProjectKey(ctx, projectID, keyName, false); err != nil {
+			return "", err
+		}
+		doc, err = c.getDocument(ctx, projectSettingsPath(projectID))
+		if err != nil {
+			return "", err
+		}
+		keys = parseProjectKeyStates(doc)
+		keyState = keys[keyName]
+		return c.submitProjectKeyAction(ctx, projectID, doc, keyState.CreateValues)
+	}
+
+	if keyName == projectKeyAPIKey {
+		token, err := extractCSRFToken(doc)
+		if err != nil {
+			return "", err
+		}
+		res, body, err := c.postForm(ctx, projectSettingsPath(projectID), url.Values{"create_key": {"api_key"}}, token)
+		if err != nil {
+			return "", err
+		}
+		defer res.Body.Close()
+		key := findCreatedProjectKey(body)
+		if key == "" {
+			return "", errors.New("project settings did not return a new API key")
+		}
+		return key, nil
+	}
+
+	return "", fmt.Errorf("project settings did not expose an action for %s", keyName)
+}
+
+func (c *Client) submitProjectKeyAction(ctx context.Context, projectID string, doc *goquery.Document, values url.Values) (string, error) {
+	if len(values) == 0 {
+		return "", errors.New("project settings did not expose a key action")
 	}
 	token, err := extractCSRFToken(doc)
 	if err != nil {
 		return "", err
 	}
-
-	values := url.Values{"create_key": {"api_key"}}
 	res, body, err := c.postForm(ctx, projectSettingsPath(projectID), values, token)
 	if err != nil {
 		return "", err
 	}
 	defer res.Body.Close()
 
-	key := findKeyCreated(body)
+	key := findCreatedProjectKey(body)
 	if key == "" {
 		return "", errors.New("project settings did not return a new API key")
 	}
-	c.RememberProjectAPIKey(projectID, key)
 	return key, nil
+}
+
+func (c *Client) toggleProjectKey(ctx context.Context, projectID, keyName string, enabled bool) error {
+	if err := c.Login(ctx); err != nil {
+		return err
+	}
+
+	doc, err := c.getDocument(ctx, projectSettingsPath(projectID))
+	if err != nil {
+		return err
+	}
+	keys := parseProjectKeyStates(doc)
+	keyState, ok := keys[keyName]
+	if !ok {
+		return fmt.Errorf("project settings did not list key %s", keyName)
+	}
+
+	if enabled == keyState.Enabled {
+		return nil
+	}
+
+	values := keyState.RevokeValues
+	if enabled {
+		values = keyState.CreateValues
+	}
+	if len(values) == 0 {
+		return fmt.Errorf("project settings did not expose a toggle action for %s", keyName)
+	}
+
+	token, err := extractCSRFToken(doc)
+	if err != nil {
+		return err
+	}
+	res, _, err := c.postForm(ctx, projectSettingsPath(projectID), values, token)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+	return nil
 }
 
 func (c *Client) GetCheck(ctx context.Context, projectID, checkID string) (*Check, error) {
@@ -836,22 +999,112 @@ func extractNamedFieldValue(doc *goquery.Document, name string) (string, bool) {
 	return strings.TrimSpace(selection.Text()), true
 }
 
-func findPlaintextAPIKey(doc *goquery.Document) string {
-	row := doc.Find("#api-keys tr").FilterFunction(func(_ int, s *goquery.Selection) bool {
-		return strings.TrimSpace(s.Find("td").First().Text()) == "API key"
-	}).First()
-	if row.Length() == 0 {
-		return ""
-	}
-	code := row.Find("code[data-plaintext]").First()
-	if value, ok := code.Attr("data-plaintext"); ok {
-		return strings.TrimSpace(value)
-	}
-	return ""
+func parseProjectKeyStates(doc *goquery.Document) map[string]projectKeyState {
+	out := map[string]projectKeyState{}
+
+	doc.Find("#api-keys tr").Each(func(_ int, row *goquery.Selection) {
+		name := normalizeProjectKeyLabel(strings.TrimSpace(row.Find("td").First().Text()))
+		if name == "" {
+			return
+		}
+
+		state := projectKeyState{}
+		if value, ok := row.Find("code[data-plaintext]").First().Attr("data-plaintext"); ok {
+			state.Plaintext = strings.TrimSpace(value)
+		}
+
+		if keyType, ok := row.Find("[data-create-key]").First().Attr("data-create-key"); ok && keyType != "" {
+			state.CreateValues = url.Values{"create_key": {strings.TrimSpace(keyType)}}
+		}
+		if keyType, ok := row.Find("[data-revoke-key]").First().Attr("data-revoke-key"); ok && keyType != "" {
+			state.RevokeValues = url.Values{"revoke_key": {strings.TrimSpace(keyType)}}
+		}
+
+		row.Find("form").Each(func(_ int, form *goquery.Selection) {
+			values := formValues(form)
+			if values.Get("create_key") != "" {
+				state.CreateValues = values
+			}
+			if values.Get("revoke_key") != "" {
+				state.RevokeValues = values
+			}
+		})
+
+		switch {
+		case len(state.RevokeValues) > 0:
+			state.Enabled = true
+		case len(state.CreateValues) > 0:
+			state.Enabled = false
+		case row.Find(".not-set").Length() > 0:
+			state.Enabled = false
+		case state.Plaintext != "":
+			state.Enabled = true
+		case strings.TrimSpace(row.Find("td").Eq(1).Text()) != "":
+			state.Enabled = true
+		}
+
+		out[name] = state
+	})
+
+	return out
 }
 
-func findKeyCreated(body string) string {
-	return regexp.MustCompile(`hcw_[A-Za-z0-9]{28}`).FindString(body)
+func formValues(form *goquery.Selection) url.Values {
+	values := url.Values{}
+
+	form.Find("input[name], button[name], textarea[name], select[name]").Each(func(_ int, field *goquery.Selection) {
+		name, ok := field.Attr("name")
+		if !ok || name == "" || name == "csrfmiddlewaretoken" {
+			return
+		}
+
+		value, _ := field.Attr("value")
+		tag := goquery.NodeName(field)
+		if tag == "textarea" && value == "" {
+			value = strings.TrimSpace(field.Text())
+		}
+		if tag == "select" && value == "" {
+			field.Find("option[selected]").Each(func(_ int, option *goquery.Selection) {
+				if value == "" {
+					value, _ = option.Attr("value")
+				}
+			})
+		}
+		values.Set(name, value)
+	})
+
+	return values
+}
+
+func normalizeProjectKeyLabel(label string) string {
+	normalized := strings.ToLower(strings.TrimSpace(label))
+
+	switch normalized {
+	case "api key":
+		return projectKeyAPIKey
+	case "api key (read-only)", "read-only api key", "api key readonly":
+		return projectKeyReadOnlyAPIKey
+	case "ping key":
+		return projectKeyPingKey
+	default:
+		return ""
+	}
+}
+
+func findCreatedProjectKey(body string) string {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(body))
+	if err == nil {
+		if value, ok := doc.Find("#key-created-modal code[data-plaintext]").First().Attr("data-plaintext"); ok {
+			return strings.TrimSpace(value)
+		}
+		text := strings.TrimSpace(doc.Find("#key-created-modal").First().Text())
+		if text != "" {
+			if match := regexp.MustCompile(`\b(?:hc[wr]_[A-Za-z0-9]{28}|[A-Za-z0-9]{20,64})\b`).FindString(text); match != "" {
+				return match
+			}
+		}
+	}
+	return regexp.MustCompile(`\b(?:hc[wr]_[A-Za-z0-9]{28}|[A-Za-z0-9]{20,64})\b`).FindString(body)
 }
 
 func diffChannels(before, after []Channel) []Channel {
