@@ -1,7 +1,7 @@
 terraform {
   required_providers {
     healthchecks = {
-      source = "snapp/healthchecks"
+      source = "ehsanmsb/healthchecks"
     }
   }
 }

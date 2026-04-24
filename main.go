@@ -11,7 +11,7 @@ import (
 
 func main() {
 	opts := providerserver.ServeOpts{
-		Address: "registry.terraform.io/snapp/healthchecks",
+		Address: "registry.terraform.io/ehsanmsb/healthchecks",
 	}
 
 	if err := providerserver.Serve(context.Background(), provider.New, opts); err != nil {
