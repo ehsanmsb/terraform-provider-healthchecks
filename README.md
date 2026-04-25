@@ -25,6 +25,17 @@ go test ./...
 go build ./...
 ```
 
+## Docs
+
+Provider/resource documentation is checked with `tfplugindocs`.
+
+Generate docs locally with:
+
+```bash
+go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.20.1
+$(go env GOPATH)/bin/tfplugindocs generate
+```
+
 ## CI
 
 GitHub Actions runs the `CI` workflow on pull requests and pushes to `main`.
@@ -35,10 +46,12 @@ The workflow verifies:
 - `go vet`
 - `go test ./...`
 - `go build ./...`
+- `tfplugindocs` generation drift check
 
 If you protect `main`, a good required status check is:
 
 - `Quality`
+- `Provider Docs`
 
 ## Releases
 

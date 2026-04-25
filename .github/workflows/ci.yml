@@ -50,3 +50,26 @@ jobs:
 
       - name: Build provider
         run: go build ./...
+
+  provider-docs:
+    name: Provider Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install tfplugindocs
+        run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.20.1
+
+      - name: Generate provider docs
+        run: "$(go env GOPATH)/bin/tfplugindocs generate"
+
+      - name: Check for generated docs drift
+        run: git diff --exit-code -- docs/ .tfplugindocs.hcl
