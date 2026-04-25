@@ -121,3 +121,22 @@ This focused example exercises:
 - `healthchecks_integration` with `type = "webhook"`
 - `healthchecks_integration` with `type = "email"`
 - `healthchecks_check.channels` attachment to both integrations
+
+## 7. Complete Project Example
+
+Use [examples/complete_project](/Users/snapp/Documents/Github/terraform-provider-healthchecks/examples/complete_project/main.tf:1) for a fuller example that creates:
+
+- one project
+- three checks
+- two integrations (`webhook` and `email`)
+- three project members
+
+Run it like this:
+
+```bash
+cd examples/complete_project
+TF_VAR_username=admin@example.test \
+TF_VAR_password=adminpass123 \
+TF_CLI_CONFIG_FILE=/path/to/dev.tfrc \
+terraform apply -parallelism=1
+```

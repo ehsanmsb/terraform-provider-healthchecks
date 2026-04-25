@@ -25,6 +25,17 @@ go test ./...
 go build ./...
 ```
 
+## Docs
+
+Provider/resource documentation is checked with `tfplugindocs`.
+
+Generate docs locally with:
+
+```bash
+go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.20.1
+$(go env GOPATH)/bin/tfplugindocs generate
+```
+
 ## CI
 
 GitHub Actions runs the `CI` workflow on pull requests and pushes to `main`.
@@ -35,10 +46,12 @@ The workflow verifies:
 - `go vet`
 - `go test ./...`
 - `go build ./...`
+- `tfplugindocs` generation drift check
 
 If you protect `main`, a good required status check is:
 
 - `Quality`
+- `Provider Docs`
 
 ## Releases
 
@@ -55,7 +68,45 @@ The repository includes:
 - `.goreleaser.yml` for provider build artifacts
 - `terraform-registry-manifest.json` for Terraform Registry metadata
 
-Note: publishing to the public Terraform Registry also requires signed release checksums and an uploaded public GPG key in the Registry settings.
+This repository is configured to produce Terraform Registry-ready releases, including:
+
+- zipped provider archives per OS/architecture
+- `terraform-provider-healthchecks_<version>_SHA256SUMS`
+- `terraform-provider-healthchecks_<version>_SHA256SUMS.sig`
+- `terraform-provider-healthchecks_<version>_manifest.json`
+
+### Terraform Registry Setup
+
+Before publishing to the public Terraform Registry:
+
+1. Generate a GPG keypair for signing provider releases.
+2. Export the ASCII-armored private key and add it to GitHub Actions secrets as `GPG_PRIVATE_KEY`.
+3. Add the private key passphrase to GitHub Actions secrets as `PASSPHRASE`.
+4. Export the ASCII-armored public key and add it in Terraform Registry under `User Settings` or namespace `Signing Keys`.
+5. Push a SemVer tag such as `v0.2.0` to trigger the signed release workflow.
+
+HashiCorp requires provider release checksums to be signed, and the Terraform Registry validates releases against the uploaded public key.
+
+Generate a Registry-compatible GPG key carefully:
+
+- use RSA or DSA, not the default ECC key type
+- keep the private key outside the repository
+- avoid rotating the signing key casually once releases are published
+
+Useful commands:
+
+```bash
+gpg --full-generate-key
+gpg --armor --export-secret-keys "your-email@example.com"
+gpg --armor --export "your-email@example.com"
+```
+
+GitHub Actions secrets required by `.github/workflows/release.yml`:
+
+- `GPG_PRIVATE_KEY`
+- `PASSPHRASE`
+
+After the first signed GitHub release exists, publish the provider in Terraform Registry from the GitHub-backed namespace and let Registry create its webhook for future releases.
 
 ## Acceptance tests
 
