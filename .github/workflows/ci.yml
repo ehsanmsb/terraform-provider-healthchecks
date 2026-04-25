@@ -69,6 +69,10 @@ jobs:
         uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "1.9.8"
+          terraform_wrapper: false
+
+      - name: Verify Terraform installation
+        run: terraform version
 
       - name: Install tfplugindocs
         run: go install github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@v0.20.1
