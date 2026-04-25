@@ -83,18 +83,41 @@ If you protect `main`, a good required status check is:
 
 ## Releases
 
-This repository uses Semantic Versioning and semantic commits.
+This repository uses Semantic Versioning with `semantic-release` and Conventional Commits.
 
-- Use commit messages such as `feat: ...`, `fix: ...`, `docs: ...`, and `chore: ...`
-- `release-please` watches `main` and prepares the next version from commit history
-- pushing a tag like `v0.1.0` triggers GoReleaser to build release artifacts and publish a GitHub release
+When a branch is merged into `main`, the release workflow analyzes the commits since the previous release, calculates the next version, creates the Git tag automatically, generates release notes, and runs GoReleaser to publish signed provider artifacts.
 
 The repository includes:
 
-- `.github/workflows/release-please.yml` for semantic version automation
-- `.github/workflows/release.yml` for tagged releases
+- `.github/workflows/release.yml` for automatic releases on `main`
+- `.releaserc.yml` for semantic-release configuration
 - `.goreleaser.yml` for provider build artifacts
 - `terraform-registry-manifest.json` for Terraform Registry metadata
+
+### Commit Rules
+
+Use standard Conventional Commit syntax:
+
+- `feat: add project data source` → minor release
+- `fix: handle project create redirect` → patch release
+- `perf: reduce retry churn` → patch release
+- `feat!: change import ID format` → major release
+- `BREAKING CHANGE: import format changed` in the commit footer → major release
+
+Important:
+
+- use `feat:` not `[feat]`
+- use `fix:` not `[fix]`
+- use `feat!:` or a `BREAKING CHANGE:` footer for major bumps
+- commits like `docs:` and `chore:` do not trigger a release by default unless they also include a breaking change
+
+Example breaking commit:
+
+```text
+feat!: rename project member role values
+
+BREAKING CHANGE: project_member.role now uses long-form role names
+```
 
 This repository is configured to produce Terraform Registry-ready releases, including:
 
@@ -111,7 +134,7 @@ Before publishing to the public Terraform Registry:
 2. Export the ASCII-armored private key and add it to GitHub Actions secrets as `GPG_PRIVATE_KEY`.
 3. Add the private key passphrase to GitHub Actions secrets as `PASSPHRASE`.
 4. Export the ASCII-armored public key and add it in Terraform Registry under `User Settings` or namespace `Signing Keys`.
-5. Push a SemVer tag such as `v0.2.0` to trigger the signed release workflow.
+5. Merge conventional commits into `main` to trigger the signed release workflow automatically.
 
 HashiCorp requires provider release checksums to be signed, and the Terraform Registry validates releases against the uploaded public key.
 
