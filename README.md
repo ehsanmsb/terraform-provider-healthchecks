@@ -25,6 +25,34 @@ go test ./...
 go build ./...
 ```
 
+## Provider Configuration
+
+Example:
+
+```hcl
+provider "healthchecks" {
+  base_url = var.healthchecks_base_url
+  username = var.healthchecks_username
+  password = var.healthchecks_password
+  timeout  = var.healthchecks_timeout
+}
+```
+
+You can pass credentials and optional settings through Terraform environment variables:
+
+```bash
+export TF_VAR_healthchecks_base_url="https://healthchecks.example.com"
+export TF_VAR_healthchecks_username="your-email@example.com"
+export TF_VAR_healthchecks_password="your-password"
+export TF_VAR_healthchecks_timeout="30s"
+```
+
+For self-hosted instances with unusual certificates, you can also model and export:
+
+```bash
+export TF_VAR_healthchecks_insecure_skip_verify=true
+```
+
 ## Docs
 
 Provider/resource documentation is checked with `tfplugindocs`.
