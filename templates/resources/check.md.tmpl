@@ -1,0 +1,25 @@
+# healthchecks_check (Resource)
+
+Manages a Healthchecks check through the Management API v3 under a specific project.
+
+{{- if .HasExample }}
+## Example Usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+{{ .SchemaMarkdown }}
+
+{{- if .HasImport }}
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" .ImportFile }}
+{{- end }}
+
+## Notes
+
+- `project_id` selects which project API key is used for API requests.
+- `channels` accepts Healthchecks integration/channel IDs to enable notifications for the check.
+- Set `channels = []` to detach all integrations from a check.

@@ -1,0 +1,26 @@
+# healthchecks_project (Resource)
+
+Manages a Healthchecks project and its project-scoped access secrets. The provider ensures the project can expose a read-write API key for downstream resources such as `healthchecks_check`.
+
+{{- if .HasExample }}
+## Example Usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+{{ .SchemaMarkdown }}
+
+{{- if .HasImport }}
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" .ImportFile }}
+{{- end }}
+
+## Notes
+
+- `api_key` is the read-write Management API key used for check CRUD operations.
+- `read_only_api_key` is useful for dashboard or read-only integrations.
+- `ping_key` is the project secret used for slug-based ping URLs.
+- Sensitive key values are stored in Terraform state, so only expose them through outputs when you explicitly need that behavior.
