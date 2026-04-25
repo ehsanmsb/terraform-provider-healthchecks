@@ -1,0 +1,27 @@
+# healthchecks_integration (Resource)
+
+Manages a project notification integration (Healthchecks channel). The current provider supports `webhook` and `email` integrations through authenticated web form endpoints.
+
+{{- if .HasExample }}
+## Example Usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+## Schema
+
+{{ .SchemaMarkdown }}
+
+{{- if .HasImport }}
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" .ImportFile }}
+{{- end }}
+
+## Notes
+
+- Use `type = "webhook"` for HTTP callbacks on up/down events.
+- Use `type = "email"` with `config.value` set to the destination email address.
+- Integrations become active for a check when their channel ID is referenced in `healthchecks_check.channels`.

@@ -1,0 +1,26 @@
+# healthchecks_project_member (Resource)
+
+Manages project membership for an existing Healthchecks project.
+
+{{- if .HasExample }}
+## Example Usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+## Schema
+
+{{ .SchemaMarkdown }}
+
+{{- if .HasImport }}
+## Import
+
+Import is supported using the following syntax:
+
+{{ codefile "shell" .ImportFile }}
+{{- end }}
+
+## Notes
+
+- `role` should use the Healthchecks role codes supported by the instance, such as member, manager, or read-only.
+- Role changes are implemented through the current web membership flow, which may remove and recreate the membership server-side.
