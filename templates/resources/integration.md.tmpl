@@ -21,5 +21,8 @@ Import is supported using the following syntax:
 ## Notes
 
 - Use `type = "webhook"` for HTTP callbacks on up/down events.
+- Webhook integrations support the optional top-level `name` attribute and the structured `webhook` block.
+- Webhook request headers can be configured with `webhook.headers_down` and `webhook.headers_up` as maps of header names to values.
+- The legacy `config` map is still accepted for webhook integrations, but the `webhook` block is the preferred interface.
 - Use `type = "email"` with `config.value` set to the destination email address.
 - Integrations become active for a check when their channel ID is referenced in `healthchecks_check.channels`.

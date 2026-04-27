@@ -13,13 +13,21 @@ resource "healthchecks_integration" "webhook" {
   type       = "webhook"
   name       = "Primary Webhook"
 
-  config = {
+  webhook = {
     method_down = "POST"
     url_down    = "https://example.com/down"
-    body_down   = "{\"state\":\"down\"}"
-    method_up   = "POST"
-    url_up      = "https://example.com/up"
-    body_up     = "{\"state\":\"up\"}"
+    body_down   = jsonencode({ state = "down" })
+    headers_down = {
+      X-Sample-Header = "$NAME has gone down"
+      X-Env           = "production"
+    }
+    method_up = "POST"
+    url_up    = "https://example.com/up"
+    body_up   = jsonencode({ state = "up" })
+    headers_up = {
+      X-Sample-Header = "$NAME has recovered"
+      X-Env           = "production"
+    }
   }
 }
 
@@ -40,17 +48,33 @@ resource "healthchecks_integration" "email" {
 
 ### Required
 
-- `config` (Map of String)
 - `project_id` (String)
 - `type` (String)
 
 ### Optional
 
+- `config` (Map of String) Legacy generic integration config map. Still supported for `type = "email"` and webhook backward compatibility, but the `webhook` block is the preferred interface for webhook integrations.
 - `name` (String)
+- `webhook` (Attributes) Structured webhook configuration. Preferred over the legacy `config` map for `type = "webhook"`. (see [below for nested schema](#nestedatt--webhook))
 
 ### Read-Only
 
 - `id` (String) The ID of this resource.
+
+<a id="nestedatt--webhook"></a>
+### Nested Schema for `webhook`
+
+Optional:
+
+- `body_down` (String)
+- `body_up` (String)
+- `headers_down` (Map of String)
+- `headers_up` (Map of String)
+- `method_down` (String)
+- `method_up` (String)
+- `url_down` (String)
+- `url_up` (String)
+
 
 
 ## Import
@@ -64,5 +88,8 @@ terraform import healthchecks_integration.webhook 1c580c01-499d-4832-a928-3a407d
 ## Notes
 
 - Use `type = "webhook"` for HTTP callbacks on up/down events.
+- Webhook integrations support the optional top-level `name` attribute and the structured `webhook` block.
+- Webhook request headers can be configured with `webhook.headers_down` and `webhook.headers_up` as maps of header names to values.
+- The legacy `config` map is still accepted for webhook integrations, but the `webhook` block is the preferred interface.
 - Use `type = "email"` with `config.value` set to the destination email address.
 - Integrations become active for a check when their channel ID is referenced in `healthchecks_check.channels`.

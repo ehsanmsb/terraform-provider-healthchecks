@@ -160,6 +160,65 @@ func TestEmailConfigToFormValues(t *testing.T) {
 	}
 }
 
+func TestWebhookConfigToFormValues(t *testing.T) {
+	values := webhookConfigToFormValues("Primary Webhook", map[string]string{
+		"method_down":  "POST",
+		"url_down":     "https://example.com/down",
+		"headers_down": "X-Sample-Header: $NAME has gone down",
+		"method_up":    "POST",
+		"url_up":       "https://example.com/up",
+		"headers_up":   "X-Sample-Header: $NAME has recovered",
+	})
+
+	if values.Get("name") != "Primary Webhook" {
+		t.Fatalf("unexpected name: %q", values.Get("name"))
+	}
+	if values.Get("headers_down") != "X-Sample-Header: $NAME has gone down" {
+		t.Fatalf("unexpected down headers: %q", values.Get("headers_down"))
+	}
+	if values.Get("headers_up") != "X-Sample-Header: $NAME has recovered" {
+		t.Fatalf("unexpected up headers: %q", values.Get("headers_up"))
+	}
+}
+
+func TestGetWebhookIntegrationParsesNameAndHeaders(t *testing.T) {
+	doc := docFromString(t, `
+		<form>
+			<input type="text" name="name" value="Primary Webhook">
+			<select name="method_down"><option value="POST" selected>POST</option></select>
+			<input type="url" name="url_down" value="https://example.com/down">
+			<textarea name="headers_down">X-Sample-Header: $NAME has gone down</textarea>
+			<select name="method_up"><option value="POST" selected>POST</option></select>
+			<input type="url" name="url_up" value="https://example.com/up">
+			<textarea name="headers_up">X-Sample-Header: $NAME has recovered</textarea>
+		</form>
+	`)
+
+	config := map[string]string{}
+	for _, field := range []string{"url_down", "body_down", "headers_down", "url_up", "body_up", "headers_up"} {
+		if value, ok := extractNamedFieldValue(doc, field); ok && strings.TrimSpace(value) != "" {
+			config[field] = value
+		}
+	}
+	if value, ok := extractNamedSelectValue(doc, "method_down"); ok {
+		config["method_down"] = value
+	}
+	if value, ok := extractNamedSelectValue(doc, "method_up"); ok {
+		config["method_up"] = value
+	}
+	name, _ := extractNamedFieldValue(doc, "name")
+
+	if name != "Primary Webhook" {
+		t.Fatalf("unexpected name: %q", name)
+	}
+	if config["headers_down"] != "X-Sample-Header: $NAME has gone down" {
+		t.Fatalf("unexpected down headers: %q", config["headers_down"])
+	}
+	if config["headers_up"] != "X-Sample-Header: $NAME has recovered" {
+		t.Fatalf("unexpected up headers: %q", config["headers_up"])
+	}
+}
+
 func TestParseBoolString(t *testing.T) {
 	cases := []struct {
 		input        string
