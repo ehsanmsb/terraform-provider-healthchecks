@@ -66,3 +66,15 @@ func TestParseHeaderLines(t *testing.T) {
 		t.Fatalf("unexpected X-Sample-Header: %q", headers["X-Sample-Header"])
 	}
 }
+
+func TestMapToStringsAllowsUnknownMap(t *testing.T) {
+	ctx := context.Background()
+
+	values, err := mapToStrings(ctx, types.MapUnknown(types.StringType))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(values) != 0 {
+		t.Fatalf("expected empty map, got %#v", values)
+	}
+}

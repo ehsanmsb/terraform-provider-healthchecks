@@ -197,7 +197,7 @@ func (r *integrationResource) ImportState(ctx context.Context, req resource.Impo
 
 func mapToStrings(ctx context.Context, m types.Map) (map[string]string, error) {
 	out := map[string]string{}
-	if m.IsNull() {
+	if m.IsNull() || m.IsUnknown() {
 		return out, nil
 	}
 	diags := m.ElementsAs(ctx, &out, false)
