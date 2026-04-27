@@ -17,7 +17,43 @@ plugins:
           release: patch
   - - "@semantic-release/release-notes-generator"
     - preset: conventionalcommits
+      presetConfig:
+        types:
+          - type: feat
+            section: Features
+            hidden: false
+          - type: fix
+            section: Bug Fixes
+            hidden: false
+          - type: perf
+            section: Performance
+            hidden: false
+          - type: refactor
+            section: Refactoring
+            hidden: false
+          - type: docs
+            hidden: true
+          - type: test
+            hidden: true
+          - type: chore
+            hidden: true
+          - type: ci
+            hidden: true
+          - type: build
+            hidden: true
+          - type: style
+            hidden: true
+      writerOpts:
+        commitsSort:
+          - subject
+          - scope
   - - "@semantic-release/exec"
     - publishCmd: |
-        printf '%s\n' "${nextRelease.notes}" > /tmp/release-notes.md
+        cat > /tmp/release-notes.md <<EOF
+        # Release v${nextRelease.version}
+
+        Automated release for terraform-provider-healthchecks.
+
+        ${nextRelease.notes}
+        EOF
         goreleaser release --clean --release-notes /tmp/release-notes.md

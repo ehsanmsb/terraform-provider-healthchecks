@@ -87,6 +87,15 @@ This repository uses Semantic Versioning with `semantic-release` and Conventiona
 
 When a branch is merged into `main`, the release workflow analyzes the commits since the previous release, calculates the next version, creates the Git tag automatically, generates release notes, and runs GoReleaser to publish signed provider artifacts.
 
+Release notes are grouped into reader-friendly sections:
+
+- `Features`
+- `Bug Fixes`
+- `Performance`
+- `Refactoring`
+
+Low-signal commit types such as `docs:`, `test:`, `chore:`, `ci:`, and `build:` are hidden from the published release notes unless they also include a breaking change.
+
 The repository includes:
 
 - `.github/workflows/release.yml` for automatic releases on `main`
@@ -101,6 +110,7 @@ Use standard Conventional Commit syntax:
 - `feat: add project data source` → minor release
 - `fix: handle project create redirect` → patch release
 - `perf: reduce retry churn` → patch release
+- `refactor: split webhook config conversion` → no version bump, but shown in release notes
 - `feat!: change import ID format` → major release
 - `BREAKING CHANGE: import format changed` in the commit footer → major release
 
