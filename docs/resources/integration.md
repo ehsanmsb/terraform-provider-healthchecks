@@ -90,6 +90,8 @@ terraform import healthchecks_integration.webhook 1c580c01-499d-4832-a928-3a407d
 - Use `type = "webhook"` for HTTP callbacks on up/down events.
 - Webhook integrations support the optional top-level `name` attribute and the structured `webhook` block.
 - Webhook request headers can be configured with `webhook.headers_down` and `webhook.headers_up` as maps of header names to values.
+- Header maps are translated into the newline-delimited `Header-Name: value` format expected by the Healthchecks webhook form.
 - The legacy `config` map is still accepted for webhook integrations, but the `webhook` block is the preferred interface.
+- Use the legacy `config` map only when you need backward compatibility with older provider versions.
 - Use `type = "email"` with `config.value` set to the destination email address.
 - Integrations become active for a check when their channel ID is referenced in `healthchecks_check.channels`.
