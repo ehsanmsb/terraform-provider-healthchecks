@@ -55,12 +55,13 @@ resource "healthchecks_integration" "email" {
 
 - `config` (Map of String) Legacy generic integration config map. Still supported for `type = "email"` and webhook backward compatibility, but the `webhook` block is the preferred interface for webhook integrations.
 - `name` (String)
-- `webhook` (Attributes) Structured webhook configuration. Preferred over the legacy `config` map for `type = "webhook"`.
+- `webhook` (Attributes) Structured webhook configuration. Preferred over the legacy `config` map for `type = "webhook"`. (see [below for nested schema](#nestedatt--webhook))
 
 ### Read-Only
 
 - `id` (String) The ID of this resource.
 
+<a id="nestedatt--webhook"></a>
 ### Nested Schema for `webhook`
 
 Optional:
@@ -73,6 +74,7 @@ Optional:
 - `method_up` (String)
 - `url_down` (String)
 - `url_up` (String)
+
 
 
 ## Import
