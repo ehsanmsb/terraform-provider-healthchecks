@@ -7,7 +7,7 @@ resource "healthchecks_integration" "webhook" {
   type       = "webhook"
   name       = "Disable Demo Webhook"
 
-  config = {
+  webhook = {
     method_down = "POST"
     url_down    = "https://example.com/down"
     method_up   = "POST"

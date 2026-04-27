@@ -7,19 +7,21 @@ resource "healthchecks_integration" "webhook" {
   type       = "webhook"
   name       = "Primary Webhook"
 
-  config = {
+  webhook = {
     method_down = "POST"
     url_down    = "https://example.com/down"
-    body_down   = "{\"state\":\"down\"}"
-    headers_down = <<-EOT
-      X-Sample-Header: $NAME has gone down
-    EOT
+    body_down   = jsonencode({ state = "down" })
+    headers_down = {
+      X-Sample-Header = "$NAME has gone down"
+      X-Env           = "production"
+    }
     method_up = "POST"
     url_up    = "https://example.com/up"
-    body_up   = "{\"state\":\"up\"}"
-    headers_up = <<-EOT
-      X-Sample-Header: $NAME has recovered
-    EOT
+    body_up   = jsonencode({ state = "up" })
+    headers_up = {
+      X-Sample-Header = "$NAME has recovered"
+      X-Env           = "production"
+    }
   }
 }
 

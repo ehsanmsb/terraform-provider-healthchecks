@@ -63,13 +63,13 @@ resource "healthchecks_integration" "webhook" {
   type       = "webhook"
   name       = "webhook-smoke"
 
-  config = {
+  webhook = {
     method_down = "POST"
     url_down    = "https://example.com/down"
-    body_down   = "{\"status\":\"down\"}"
+    body_down   = jsonencode({ status = "down" })
     method_up   = "POST"
     url_up      = "https://example.com/up"
-    body_up     = "{\"status\":\"up\"}"
+    body_up     = jsonencode({ status = "up" })
   }
 }
 
