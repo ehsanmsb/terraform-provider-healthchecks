@@ -615,11 +615,7 @@ func (c *Client) CreateWebhookIntegration(ctx context.Context, in Integration) (
 	if err != nil {
 		return nil, err
 	}
-	values := url.Values{}
-	for k, v := range in.Config {
-		values.Set(k, v)
-	}
-	values.Set("name", in.Name)
+	values := webhookConfigToFormValues(in.Name, in.Config)
 	if _, _, err := c.postForm(ctx, fmt.Sprintf("/projects/%s/add_webhook/", in.ProjectID), values, token); err != nil {
 		return nil, err
 	}
@@ -735,11 +731,7 @@ func (c *Client) UpdateWebhookIntegration(ctx context.Context, in Integration) (
 	if err != nil {
 		return nil, err
 	}
-	values := url.Values{}
-	for k, v := range in.Config {
-		values.Set(k, v)
-	}
-	values.Set("name", in.Name)
+	values := webhookConfigToFormValues(in.Name, in.Config)
 	if _, _, err := c.postForm(ctx, fmt.Sprintf("/integrations/%s/edit/", in.ID), values, token); err != nil {
 		return nil, err
 	}
@@ -1263,6 +1255,15 @@ func emailConfigToFormValues(config map[string]string) url.Values {
 	if parseBoolString(config["up"], true) {
 		values.Set("up", "on")
 	}
+	return values
+}
+
+func webhookConfigToFormValues(name string, config map[string]string) url.Values {
+	values := url.Values{}
+	for key, value := range config {
+		values.Set(key, value)
+	}
+	values.Set("name", name)
 	return values
 }
 

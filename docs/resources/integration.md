@@ -17,9 +17,15 @@ resource "healthchecks_integration" "webhook" {
     method_down = "POST"
     url_down    = "https://example.com/down"
     body_down   = "{\"state\":\"down\"}"
-    method_up   = "POST"
-    url_up      = "https://example.com/up"
-    body_up     = "{\"state\":\"up\"}"
+    headers_down = <<-EOT
+      X-Sample-Header: $NAME has gone down
+    EOT
+    method_up = "POST"
+    url_up    = "https://example.com/up"
+    body_up   = "{\"state\":\"up\"}"
+    headers_up = <<-EOT
+      X-Sample-Header: $NAME has recovered
+    EOT
   }
 }
 
@@ -64,5 +70,7 @@ terraform import healthchecks_integration.webhook 1c580c01-499d-4832-a928-3a407d
 ## Notes
 
 - Use `type = "webhook"` for HTTP callbacks on up/down events.
+- Webhook integrations support the optional top-level `name` attribute.
+- Webhook request headers can be configured with `config.headers_down` and `config.headers_up` using newline-delimited `Header-Name: value` entries.
 - Use `type = "email"` with `config.value` set to the destination email address.
 - Integrations become active for a check when their channel ID is referenced in `healthchecks_check.channels`.
