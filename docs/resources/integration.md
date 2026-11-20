@@ -56,7 +56,7 @@ resource "healthchecks_integration" "email" {
 ### Optional
 
 - `config` (Map of String) Legacy generic integration config map. Still supported for `type = "email"` and webhook backward compatibility, but the `webhook` block is the preferred interface for webhook integrations.
-- `name` (String)
+- `name` (String) Name of a webhook integration. Omit for email integrations.
 - `project_api_key` (String, Sensitive) Read-write API key used to identify the channel after creating the integration. Reference the project resource's api_key.
 - `webhook` (Attributes) Structured webhook configuration. Preferred over the legacy `config` map for `type = "webhook"`. (see [below for nested schema](#nestedatt--webhook))
 
@@ -98,5 +98,5 @@ terraform import healthchecks_integration.webhook 1c580c01-499d-4832-a928-3a407d
 - Header maps are translated into the newline-delimited `Header-Name: value` format expected by the Healthchecks webhook form.
 - The legacy `config` map is still accepted for webhook integrations, but the `webhook` block is the preferred interface.
 - Use the legacy `config` map only when you need backward compatibility with older provider versions.
-- Use `type = "email"` with `config.value` set to the destination email address.
+- Use `type = "email"` with `config.value` set to the destination email address. Omit `name` and `webhook` for email. The `config.up` and `config.down` flags default to `"true"` when omitted.
 - Integrations become active for a check when their channel ID is referenced in `healthchecks_check.channels`.

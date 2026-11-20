@@ -5,6 +5,9 @@ import (
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+
+	"github.com/ehsanmsb/terraform-provider-healthchecks/internal/client"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -14,7 +17,7 @@ func TestConfigFromModelWebhookBlock(t *testing.T) {
 	cfg, diags := configFromModel(ctx, model{
 		Type:   types.StringValue("webhook"),
 		Config: types.MapNull(types.StringType),
-		Webhook: webhookModel{
+		Webhook: testWebhookObject(t, webhookModel{
 			MethodDown: types.StringValue("POST"),
 			URLDown:    types.StringValue("https://example.com/down"),
 			BodyDown:   types.StringValue(`{"state":"down"}`),
@@ -22,7 +25,7 @@ func TestConfigFromModelWebhookBlock(t *testing.T) {
 				"X-Env":           types.StringValue("production"),
 				"X-Sample-Header": types.StringValue("$NAME has gone down"),
 			}),
-		},
+		}),
 	})
 	if diags.HasError() {
 		t.Fatalf("unexpected diagnostics: %#v", diags)
@@ -47,9 +50,9 @@ func TestConfigFromModelRejectsConflictingWebhookInputs(t *testing.T) {
 		Config: types.MapValueMust(types.StringType, map[string]attr.Value{
 			"url_down": types.StringValue("https://example.com/down"),
 		}),
-		Webhook: webhookModel{
+		Webhook: testWebhookObject(t, webhookModel{
 			URLDown: types.StringValue("https://example.com/down"),
-		},
+		}),
 	})
 	if !diags.HasError() {
 		t.Fatal("expected diagnostics for conflicting webhook inputs")
@@ -76,5 +79,88 @@ func TestMapToStringsAllowsUnknownMap(t *testing.T) {
 	}
 	if len(values) != 0 {
 		t.Fatalf("expected empty map, got %#v", values)
+	}
+}
+
+func testWebhookObject(t *testing.T, value webhookModel) types.Object {
+	t.Helper()
+	ctx := context.Background()
+	if value.HeadersDown.IsNull() {
+		value.HeadersDown = types.MapNull(types.StringType)
+	}
+	if value.HeadersUp.IsNull() {
+		value.HeadersUp = types.MapNull(types.StringType)
+	}
+	var resp resource.SchemaResponse
+	New().Schema(ctx, resource.SchemaRequest{}, &resp)
+	obj, diags := types.ObjectValueFrom(ctx, resp.Schema.Attributes["webhook"].GetType().(types.ObjectType).AttrTypes, value)
+	if diags.HasError() {
+		t.Fatal(diags)
+	}
+	return obj
+}
+
+func TestEmailStateAcceptsUnknownWebhook(t *testing.T) {
+	ctx := context.Background()
+	webhook := testWebhookObject(t, webhookModel{})
+	state := model{
+		Type: types.StringValue("email"),
+		Config: mapStringValues(map[string]string{
+			"value": "operator@example.com",
+			"down":  "true",
+			"up":    "true",
+		}),
+		Webhook: types.ObjectUnknown(webhook.AttributeTypes(ctx)),
+	}
+	cfg, diags := configFromModel(ctx, state)
+	if diags.HasError() {
+		t.Fatal(diags)
+	}
+
+	for _, tc := range []struct{ input, want types.Object }{
+		{state.Webhook, types.ObjectNull(webhook.AttributeTypes(ctx))},
+		{webhook, webhook},
+	} {
+		state.Webhook = tc.input
+		diags = applyIntegration(ctx, &state, &client.Integration{Type: "email", Config: cfg})
+		if diags.HasError() {
+			t.Fatal(diags)
+		}
+		if !state.Webhook.Equal(tc.want) {
+			t.Fatalf("webhook state = %s, want %s", state.Webhook, tc.want)
+		}
+	}
+
+	state.Name = types.StringValue("Operator")
+	if _, diags = configFromModel(ctx, state); !diags.HasError() {
+		t.Fatal("expected email name to be rejected before creating the integration")
+	}
+}
+
+func TestEmailStatePreservesOmittedAndEquivalentFlags(t *testing.T) {
+	state := model{
+		Config: mapStringValues(map[string]string{
+			"value": "operator@example.com",
+			"up":    "yes",
+		}),
+	}
+	remote := &client.Integration{
+		Type:   "email",
+		Config: map[string]string{"value": "operator@example.com", "up": "true", "down": "true"},
+	}
+	want := state.Config
+	if diags := applyIntegration(context.Background(), &state, remote); diags.HasError() {
+		t.Fatal(diags)
+	}
+	if !state.Config.Equal(want) {
+		t.Fatalf("email config = %s, want %s", state.Config, want)
+	}
+
+	remote.Config["down"] = "false"
+	if diags := applyIntegration(context.Background(), &state, remote); diags.HasError() {
+		t.Fatal(diags)
+	}
+	if got := state.Config.Elements()["down"]; got == nil || !got.Equal(types.StringValue("false")) {
+		t.Fatal("non-default notification flag was not reported in state")
 	}
 }

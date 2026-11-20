@@ -28,5 +28,5 @@ Import is supported using the following syntax:
 - Header maps are translated into the newline-delimited `Header-Name: value` format expected by the Healthchecks webhook form.
 - The legacy `config` map is still accepted for webhook integrations, but the `webhook` block is the preferred interface.
 - Use the legacy `config` map only when you need backward compatibility with older provider versions.
-- Use `type = "email"` with `config.value` set to the destination email address.
+- Use `type = "email"` with `config.value` set to the destination email address. Omit `name` and `webhook` for email. The `config.up` and `config.down` flags default to `"true"` when omitted.
 - Integrations become active for a check when their channel ID is referenced in `healthchecks_check.channels`.
