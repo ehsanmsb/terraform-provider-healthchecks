@@ -12,7 +12,6 @@ import (
 	"net/http/cookiejar"
 	"net/url"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -43,9 +42,10 @@ type Client struct {
 	http      *http.Client
 	userAgent string
 
-	mu             sync.Mutex
-	loggedIn       bool
-	projectAPIKeys map[string]string
+	integrationCreateMu sync.Mutex
+	mu                  sync.Mutex
+	loggedIn            bool
+	projectAPIKeys      map[string]string
 }
 
 type Project struct {
@@ -603,72 +603,59 @@ func (c *Client) withProjectAPIKey(projectID, apiKey string, fn func(apiKey stri
 }
 
 func (c *Client) CreateWebhookIntegration(ctx context.Context, in Integration) (*Integration, error) {
-	if err := c.Login(ctx); err != nil {
-		return nil, err
-	}
-
-	before, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
+	id, err := c.createIntegrationChannel(ctx, in, "webhook", webhookConfigToFormValues(in.Name, in.Config))
 	if err != nil {
 		return nil, err
 	}
-	doc, err := c.getDocument(ctx, fmt.Sprintf("/projects/%s/add_webhook/", in.ProjectID))
-	if err != nil {
-		return nil, err
-	}
-	token, err := extractCSRFToken(doc)
-	if err != nil {
-		return nil, err
-	}
-	values := webhookConfigToFormValues(in.Name, in.Config)
-	if _, _, err := c.postForm(ctx, fmt.Sprintf("/projects/%s/add_webhook/", in.ProjectID), values, token); err != nil {
-		return nil, err
-	}
-
-	after, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
-	if err != nil {
-		return nil, err
-	}
-	created := diffChannels(before, after)
-	if len(created) == 0 {
-		return nil, errors.New("could not identify created webhook integration")
-	}
-	last := created[len(created)-1]
-	return c.GetWebhookIntegration(ctx, in.ProjectID, last.ID)
+	return c.GetWebhookIntegration(ctx, in.ProjectID, id)
 }
 
 func (c *Client) CreateEmailIntegration(ctx context.Context, in Integration) (*Integration, error) {
-	if err := c.Login(ctx); err != nil {
+	id, err := c.createIntegrationChannel(ctx, in, "email", emailConfigToFormValues(in.Config))
+	if err != nil {
 		return nil, err
 	}
+	return c.GetEmailIntegration(ctx, in.ProjectID, id)
+}
+
+func (c *Client) createIntegrationChannel(ctx context.Context, in Integration, kind string, values url.Values) (string, error) {
+	if err := c.Login(ctx); err != nil {
+		return "", err
+	}
+
+	// Healthchecks redirects to the channel list on success without returning the new ID.
+	c.integrationCreateMu.Lock()
+	defer c.integrationCreateMu.Unlock()
 
 	before, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	doc, err := c.getDocument(ctx, fmt.Sprintf("/projects/%s/add_email/", in.ProjectID))
+	formPath := fmt.Sprintf("/projects/%s/add_%s/", in.ProjectID, kind)
+	doc, err := c.getDocument(ctx, formPath)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	token, err := extractCSRFToken(doc)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
+	res, _, err := c.postForm(ctx, formPath, values, token)
+	if err != nil {
+		return "", err
+	}
+	defer res.Body.Close()
 
-	values := emailConfigToFormValues(in.Config)
-	if _, _, err := c.postForm(ctx, fmt.Sprintf("/projects/%s/add_email/", in.ProjectID), values, token); err != nil {
-		return nil, err
+	channelsPath := c.resolveURL(fmt.Sprintf("/projects/%s/integrations/", in.ProjectID)).Path
+	if res.StatusCode != http.StatusOK || res.Request == nil || res.Request.URL.Path != channelsPath {
+		return "", fmt.Errorf("Healthchecks did not confirm creation of the %s integration (HTTP %d); check the integration settings", kind, res.StatusCode)
 	}
 
 	after, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
 	if err != nil {
-		return nil, err
+		return "", err
 	}
-	created := diffChannels(before, after)
-	if len(created) == 0 {
-		return nil, errors.New("could not identify created email integration")
-	}
-	last := created[len(created)-1]
-	return c.GetEmailIntegration(ctx, in.ProjectID, last.ID)
+	return createdChannelID(before, after, kind)
 }
 
 func (c *Client) GetWebhookIntegration(ctx context.Context, projectID, channelID string) (*Integration, error) {
@@ -710,10 +697,11 @@ func (c *Client) GetEmailIntegration(ctx context.Context, projectID, channelID s
 		return nil, err
 	}
 
-	config := map[string]string{}
-	if value, ok := extractNamedFieldValue(doc, "value"); ok && strings.TrimSpace(value) != "" {
-		config["value"] = value
+	value, ok := extractNamedFieldValue(doc, "value")
+	if !ok || strings.TrimSpace(value) == "" {
+		return nil, errors.New("channel did not return an email integration form; verify the channel ID")
 	}
+	config := map[string]string{"value": value}
 	config["up"] = boolString(extractNamedCheckboxValue(doc, "up"))
 	config["down"] = boolString(extractNamedCheckboxValue(doc, "down"))
 
@@ -1214,21 +1202,26 @@ func findCreatedProjectKey(body string) string {
 	return ""
 }
 
-func diffChannels(before, after []Channel) []Channel {
+func createdChannelID(before, after []Channel, kind string) (string, error) {
 	known := map[string]struct{}{}
 	for _, ch := range before {
 		known[ch.ID] = struct{}{}
 	}
-	var out []Channel
+
+	var id string
 	for _, ch := range after {
-		if _, ok := known[ch.ID]; !ok {
-			out = append(out, ch)
+		if _, ok := known[ch.ID]; ok || ch.Kind != kind || ch.ID == "" {
+			continue
 		}
+		if id != "" {
+			return "", fmt.Errorf("multiple new %s integrations found; inspect the project's channels and import the correct integration", kind)
+		}
+		id = ch.ID
 	}
-	slices.SortFunc(out, func(a, b Channel) int {
-		return strings.Compare(a.ID, b.ID)
-	})
-	return out
+	if id == "" {
+		return "", fmt.Errorf("could not identify created %s integration", kind)
+	}
+	return id, nil
 }
 
 func normalizeRoleLabel(role string) string {
@@ -1249,10 +1242,10 @@ func emailConfigToFormValues(config map[string]string) url.Values {
 	if value := strings.TrimSpace(config["value"]); value != "" {
 		values.Set("value", value)
 	}
-	if parseBoolString(config["down"], true) {
+	if ParseBoolString(config["down"], true) {
 		values.Set("down", "on")
 	}
-	if parseBoolString(config["up"], true) {
+	if ParseBoolString(config["up"], true) {
 		values.Set("up", "on")
 	}
 	return values
@@ -1267,7 +1260,7 @@ func webhookConfigToFormValues(name string, config map[string]string) url.Values
 	return values
 }
 
-func parseBoolString(v string, defaultValue bool) bool {
+func ParseBoolString(v string, defaultValue bool) bool {
 	switch strings.ToLower(strings.TrimSpace(v)) {
 	case "":
 		return defaultValue

@@ -15,14 +15,16 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 
 	"github.com/ehsanmsb/terraform-provider-healthchecks/internal/client"
 	"github.com/ehsanmsb/terraform-provider-healthchecks/internal/providerdata"
 )
 
 var (
-	_ resource.Resource                = (*integrationResource)(nil)
-	_ resource.ResourceWithImportState = (*integrationResource)(nil)
+	_ resource.Resource                   = (*integrationResource)(nil)
+	_ resource.ResourceWithImportState    = (*integrationResource)(nil)
+	_ resource.ResourceWithValidateConfig = (*integrationResource)(nil)
 )
 
 func New() resource.Resource { return &integrationResource{} }
@@ -36,7 +38,7 @@ type model struct {
 	Type          types.String `tfsdk:"type"`
 	Name          types.String `tfsdk:"name"`
 	Config        types.Map    `tfsdk:"config"`
-	Webhook       webhookModel `tfsdk:"webhook"`
+	Webhook       types.Object `tfsdk:"webhook"`
 }
 
 type webhookModel struct {
@@ -66,7 +68,7 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				MarkdownDescription: "Read-write API key used to identify the channel after creating the integration. Reference the project resource's api_key.",
 			},
 			"type": schema.StringAttribute{Required: true},
-			"name": schema.StringAttribute{Optional: true},
+			"name": schema.StringAttribute{Optional: true, MarkdownDescription: "Name of a webhook integration. Omit for email integrations."},
 			"config": schema.MapAttribute{
 				Optional:            true,
 				Computed:            true,
@@ -75,7 +77,6 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 			},
 			"webhook": schema.SingleNestedAttribute{
 				Optional:            true,
-				Computed:            true,
 				MarkdownDescription: "Structured webhook configuration. Preferred over the legacy `config` map for `type = \"webhook\"`.",
 				Attributes: map[string]schema.Attribute{
 					"method_down":  schema.StringAttribute{Optional: true},
@@ -97,6 +98,19 @@ func (r *integrationResource) Configure(_ context.Context, req resource.Configur
 		return
 	}
 	r.client = req.ProviderData.(*providerdata.ConfiguredClient).Client
+}
+
+func (r *integrationResource) ValidateConfig(ctx context.Context, req resource.ValidateConfigRequest, resp *resource.ValidateConfigResponse) {
+	var integrationType, name types.String
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("type"), &integrationType)...)
+	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("name"), &name)...)
+	validateEmailName(integrationType, name, &resp.Diagnostics)
+}
+
+func validateEmailName(integrationType, name types.String, diags *diag.Diagnostics) {
+	if integrationType.ValueString() == "email" && name.ValueString() != "" {
+		diags.AddAttributeError(path.Root("name"), "Name Not Supported for Email Integrations", "Omit name when type is email.")
+	}
 }
 
 func (r *integrationResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
@@ -125,7 +139,10 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	state := plan
-	applyIntegration(&state, integration)
+	resp.Diagnostics.Append(applyIntegration(ctx, &state, integration)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -146,7 +163,10 @@ func (r *integrationResource) Read(ctx context.Context, req resource.ReadRequest
 		return
 	}
 
-	applyIntegration(&state, integration)
+	resp.Diagnostics.Append(applyIntegration(ctx, &state, integration)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -176,7 +196,10 @@ func (r *integrationResource) Update(ctx context.Context, req resource.UpdateReq
 	}
 
 	state := plan
-	applyIntegration(&state, integration)
+	resp.Diagnostics.Append(applyIntegration(ctx, &state, integration)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -234,6 +257,18 @@ func webhookHasValues(m webhookModel) bool {
 
 func configFromModel(ctx context.Context, plan model) (map[string]string, diag.Diagnostics) {
 	var diags diag.Diagnostics
+	validateEmailName(plan.Type, plan.Name, &diags)
+	if diags.HasError() {
+		return nil, diags
+	}
+
+	var webhook webhookModel
+	if !plan.Webhook.IsNull() && !plan.Webhook.IsUnknown() {
+		diags.Append(plan.Webhook.As(ctx, &webhook, basetypes.ObjectAsOptions{})...)
+		if diags.HasError() {
+			return nil, diags
+		}
+	}
 
 	legacyConfig, err := mapToStrings(ctx, plan.Config)
 	if err != nil {
@@ -243,7 +278,7 @@ func configFromModel(ctx context.Context, plan model) (map[string]string, diag.D
 
 	switch plan.Type.ValueString() {
 	case "webhook":
-		hasWebhook := webhookHasValues(plan.Webhook)
+		hasWebhook := webhookHasValues(webhook)
 		hasLegacy := !plan.Config.IsNull() && !plan.Config.IsUnknown()
 
 		if hasWebhook && hasLegacy {
@@ -254,7 +289,7 @@ func configFromModel(ctx context.Context, plan model) (map[string]string, diag.D
 			return nil, diags
 		}
 		if hasWebhook {
-			webhookConfig, err := webhookToConfig(ctx, plan.Webhook)
+			webhookConfig, err := webhookToConfig(ctx, webhook)
 			if err != nil {
 				diags.AddError("Invalid Webhook Configuration", err.Error())
 				return nil, diags
@@ -271,7 +306,7 @@ func configFromModel(ctx context.Context, plan model) (map[string]string, diag.D
 		)
 		return nil, diags
 	case "email":
-		if webhookHasValues(plan.Webhook) {
+		if webhookHasValues(webhook) {
 			diags.AddError(
 				"Webhook Block Not Allowed",
 				"The `webhook` block can only be used when `type = \"webhook\"`.",
@@ -374,7 +409,7 @@ func mapStringValues(values map[string]string) types.Map {
 	return types.MapValueMust(types.StringType, attrs)
 }
 
-func applyIntegration(state *model, in *client.Integration) {
+func applyIntegration(ctx context.Context, state *model, in *client.Integration) diag.Diagnostics {
 	state.ID = types.StringValue(in.ID)
 	state.ProjectID = types.StringValue(in.ProjectID)
 	state.Type = types.StringValue(in.Type)
@@ -382,15 +417,20 @@ func applyIntegration(state *model, in *client.Integration) {
 		state.Name = types.StringValue(in.Name)
 	}
 
-	keys := make([]string, 0, len(in.Config))
-	for key := range in.Config {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
 	values := map[string]attr.Value{}
-	for _, key := range keys {
-		values[key] = types.StringValue(in.Config[key])
+	configured := state.Config.Elements()
+	configKnown := !state.Config.IsNull() && !state.Config.IsUnknown()
+	for key, value := range in.Config {
+		if in.Type == "email" && (key == "up" || key == "down") && configKnown {
+			prior, exists := configured[key].(types.String)
+			if client.ParseBoolString(prior.ValueString(), true) == (value == "true") {
+				if exists {
+					values[key] = prior
+				}
+				continue
+			}
+		}
+		values[key] = types.StringValue(value)
 	}
 	if len(values) == 0 {
 		state.Config = types.MapNull(types.StringType)
@@ -399,20 +439,16 @@ func applyIntegration(state *model, in *client.Integration) {
 	}
 
 	if in.Type != "webhook" {
-		state.Webhook = webhookModel{
-			MethodDown:  types.StringNull(),
-			URLDown:     types.StringNull(),
-			BodyDown:    types.StringNull(),
-			HeadersDown: types.MapNull(types.StringType),
-			MethodUp:    types.StringNull(),
-			URLUp:       types.StringNull(),
-			BodyUp:      types.StringNull(),
-			HeadersUp:   types.MapNull(types.StringType),
+		if state.Webhook.IsUnknown() {
+			state.Webhook = types.ObjectNull(state.Webhook.AttributeTypes(ctx))
 		}
-		return
+		return nil
 	}
 
-	state.Webhook = webhookModel{
+	if state.Webhook.IsNull() {
+		return nil
+	}
+	webhook, diags := types.ObjectValueFrom(ctx, state.Webhook.AttributeTypes(ctx), webhookModel{
 		MethodDown:  stringOrNull(in.Config["method_down"]),
 		URLDown:     stringOrNull(in.Config["url_down"]),
 		BodyDown:    stringOrNull(in.Config["body_down"]),
@@ -421,7 +457,9 @@ func applyIntegration(state *model, in *client.Integration) {
 		URLUp:       stringOrNull(in.Config["url_up"]),
 		BodyUp:      stringOrNull(in.Config["body_up"]),
 		HeadersUp:   mapStringValues(parseHeaderLines(in.Config["headers_up"])),
-	}
+	})
+	state.Webhook = webhook
+	return diags
 }
 
 func stringOrNull(value string) types.String {

@@ -294,8 +294,8 @@ func TestParseBoolString(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		if got := parseBoolString(tc.input, tc.defaultValue); got != tc.want {
-			t.Fatalf("parseBoolString(%q, %t) = %t, want %t", tc.input, tc.defaultValue, got, tc.want)
+		if got := ParseBoolString(tc.input, tc.defaultValue); got != tc.want {
+			t.Fatalf("ParseBoolString(%q, %t) = %t, want %t", tc.input, tc.defaultValue, got, tc.want)
 		}
 	}
 }
@@ -309,4 +309,23 @@ func docFromString(t *testing.T, body string) *goquery.Document {
 	}
 
 	return doc
+}
+
+func TestCreatedChannelIDMatchesKindAndRejectsAmbiguity(t *testing.T) {
+	before := []Channel{{ID: "old", Kind: "email"}}
+	after := append(append([]Channel(nil), before...), Channel{ID: "email", Kind: "email"}, Channel{ID: "webhook", Kind: "webhook"})
+	for _, kind := range []string{"email", "webhook"} {
+		got, err := createdChannelID(before, after, kind)
+		if err != nil || got != kind {
+			t.Fatalf("created %s ID = %q, err = %v", kind, got, err)
+		}
+	}
+
+	after = append(after, Channel{ID: "other", Kind: "email"})
+	if got, err := createdChannelID(before, after, "email"); err == nil || got != "" {
+		t.Fatalf("ambiguous email ID = %q, err = %v", got, err)
+	}
+	if got, err := createdChannelID(before, after, "unknown"); err == nil || got != "" {
+		t.Fatalf("missing channel ID = %q, err = %v", got, err)
+	}
 }
