@@ -30,12 +30,13 @@ func New() resource.Resource { return &integrationResource{} }
 type integrationResource struct{ client *client.Client }
 
 type model struct {
-	ID        types.String `tfsdk:"id"`
-	ProjectID types.String `tfsdk:"project_id"`
-	Type      types.String `tfsdk:"type"`
-	Name      types.String `tfsdk:"name"`
-	Config    types.Map    `tfsdk:"config"`
-	Webhook   webhookModel `tfsdk:"webhook"`
+	ID            types.String `tfsdk:"id"`
+	ProjectID     types.String `tfsdk:"project_id"`
+	ProjectAPIKey types.String `tfsdk:"project_api_key"`
+	Type          types.String `tfsdk:"type"`
+	Name          types.String `tfsdk:"name"`
+	Config        types.Map    `tfsdk:"config"`
+	Webhook       webhookModel `tfsdk:"webhook"`
 }
 
 type webhookModel struct {
@@ -57,10 +58,15 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Manages project integrations. The current implementation supports `webhook` and `email` channels through authenticated web form endpoints.",
 		Attributes: map[string]schema.Attribute{
-			"id":         schema.StringAttribute{Computed: true},
+			"id":         schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"project_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
-			"type":       schema.StringAttribute{Required: true},
-			"name":       schema.StringAttribute{Optional: true},
+			"project_api_key": schema.StringAttribute{
+				Optional:            true,
+				Sensitive:           true,
+				MarkdownDescription: "Read-write API key used to identify the channel after creating the integration. Reference the project resource's api_key.",
+			},
+			"type": schema.StringAttribute{Required: true},
+			"name": schema.StringAttribute{Optional: true},
 			"config": schema.MapAttribute{
 				Optional:            true,
 				Computed:            true,
@@ -107,10 +113,11 @@ func (r *integrationResource) Create(ctx context.Context, req resource.CreateReq
 	}
 
 	integration, err := r.createIntegration(ctx, client.Integration{
-		ProjectID: plan.ProjectID.ValueString(),
-		Type:      plan.Type.ValueString(),
-		Name:      plan.Name.ValueString(),
-		Config:    cfg,
+		ProjectID:     plan.ProjectID.ValueString(),
+		ProjectAPIKey: plan.ProjectAPIKey.ValueString(),
+		Type:          plan.Type.ValueString(),
+		Name:          plan.Name.ValueString(),
+		Config:        cfg,
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Create Integration", err.Error())

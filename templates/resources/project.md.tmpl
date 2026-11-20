@@ -21,6 +21,7 @@ Import is supported using the following syntax:
 ## Notes
 
 - `api_key` is the read-write Management API key used for check CRUD operations.
+- If the stored read-write key is missing or rejected, apply only the project resource with `api_key_enabled = false`, then apply it again with `api_key_enabled = true`. This replaces the remote key, so update any other clients that use it.
 - `read_only_api_key` is useful for dashboard or read-only integrations.
 - `ping_key` is the project secret used for slug-based ping URLs.
 - Sensitive key values are stored in Terraform state, so only expose them through outputs when you explicitly need that behavior.

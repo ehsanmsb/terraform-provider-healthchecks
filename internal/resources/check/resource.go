@@ -29,20 +29,21 @@ func New() resource.Resource { return &checkResource{} }
 type checkResource struct{ client *client.Client }
 
 type model struct {
-	ID        types.String `tfsdk:"id"`
-	ProjectID types.String `tfsdk:"project_id"`
-	Name      types.String `tfsdk:"name"`
-	Slug      types.String `tfsdk:"slug"`
-	Tags      types.List   `tfsdk:"tags"`
-	Desc      types.String `tfsdk:"desc"`
-	Timeout   types.Int64  `tfsdk:"timeout"`
-	Grace     types.Int64  `tfsdk:"grace"`
-	Schedule  types.String `tfsdk:"schedule"`
-	TZ        types.String `tfsdk:"tz"`
-	Channels  types.List   `tfsdk:"channels"`
-	UUID      types.String `tfsdk:"uuid"`
-	PingURL   types.String `tfsdk:"ping_url"`
-	Status    types.String `tfsdk:"status"`
+	ID            types.String `tfsdk:"id"`
+	ProjectID     types.String `tfsdk:"project_id"`
+	ProjectAPIKey types.String `tfsdk:"project_api_key"`
+	Name          types.String `tfsdk:"name"`
+	Slug          types.String `tfsdk:"slug"`
+	Tags          types.List   `tfsdk:"tags"`
+	Desc          types.String `tfsdk:"desc"`
+	Timeout       types.Int64  `tfsdk:"timeout"`
+	Grace         types.Int64  `tfsdk:"grace"`
+	Schedule      types.String `tfsdk:"schedule"`
+	TZ            types.String `tfsdk:"tz"`
+	Channels      types.List   `tfsdk:"channels"`
+	UUID          types.String `tfsdk:"uuid"`
+	PingURL       types.String `tfsdk:"ping_url"`
+	Status        types.String `tfsdk:"status"`
 }
 
 func (r *checkResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -51,22 +52,27 @@ func (r *checkResource) Metadata(_ context.Context, req resource.MetadataRequest
 
 func (r *checkResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages a Healthchecks check using the Management API v3. The provider obtains a project read-write API key via project settings when necessary.",
+		MarkdownDescription: "Manages a Healthchecks check using the Management API v3. The check uses the read-write API key managed by the linked healthchecks_project resource.",
 		Attributes: map[string]schema.Attribute{
 			"id":         schema.StringAttribute{Computed: true},
 			"project_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
-			"name":       schema.StringAttribute{Required: true},
-			"slug":       schema.StringAttribute{Optional: true},
-			"tags":       schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, nil))},
-			"desc":       schema.StringAttribute{Optional: true},
-			"timeout":    schema.Int64Attribute{Optional: true},
-			"grace":      schema.Int64Attribute{Optional: true},
-			"schedule":   schema.StringAttribute{Optional: true},
-			"tz":         schema.StringAttribute{Optional: true},
-			"channels":   schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, nil))},
-			"uuid":       schema.StringAttribute{Computed: true},
-			"ping_url":   schema.StringAttribute{Computed: true},
-			"status":     schema.StringAttribute{Computed: true},
+			"project_api_key": schema.StringAttribute{
+				Optional:            true,
+				Sensitive:           true,
+				MarkdownDescription: "Read-write API key for the project. Reference the project resource's api_key to supply the key across Terraform plan and apply.",
+			},
+			"name":     schema.StringAttribute{Required: true},
+			"slug":     schema.StringAttribute{Optional: true},
+			"tags":     schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, nil))},
+			"desc":     schema.StringAttribute{Optional: true},
+			"timeout":  schema.Int64Attribute{Optional: true},
+			"grace":    schema.Int64Attribute{Optional: true},
+			"schedule": schema.StringAttribute{Optional: true},
+			"tz":       schema.StringAttribute{Optional: true},
+			"channels": schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, nil))},
+			"uuid":     schema.StringAttribute{Computed: true},
+			"ping_url": schema.StringAttribute{Computed: true},
+			"status":   schema.StringAttribute{Computed: true},
 		},
 	}
 }
@@ -84,7 +90,7 @@ func (r *checkResource) Create(ctx context.Context, req resource.CreateRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	check, err := r.client.CreateCheck(ctx, plan.ProjectID.ValueString(), buildPayload(plan))
+	check, err := r.client.CreateCheck(ctx, plan.ProjectID.ValueString(), plan.ProjectAPIKey.ValueString(), buildPayload(plan))
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Create Check", err.Error())
 		return
@@ -100,7 +106,7 @@ func (r *checkResource) Read(ctx context.Context, req resource.ReadRequest, resp
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	check, err := r.client.GetCheck(ctx, state.ProjectID.ValueString(), state.ID.ValueString())
+	check, err := r.client.GetCheck(ctx, state.ProjectID.ValueString(), state.ProjectAPIKey.ValueString(), state.ID.ValueString())
 	if err != nil {
 		if errors.Is(err, client.ErrNotFound()) {
 			resp.State.RemoveResource(ctx)
@@ -121,7 +127,7 @@ func (r *checkResource) Update(ctx context.Context, req resource.UpdateRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	check, err := r.client.UpdateCheck(ctx, state.ProjectID.ValueString(), state.ID.ValueString(), buildPayload(plan))
+	check, err := r.client.UpdateCheck(ctx, state.ProjectID.ValueString(), plan.ProjectAPIKey.ValueString(), state.ID.ValueString(), buildPayload(plan))
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Update Check", err.Error())
 		return
@@ -138,7 +144,7 @@ func (r *checkResource) Delete(ctx context.Context, req resource.DeleteRequest, 
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if err := r.client.DeleteCheck(ctx, state.ProjectID.ValueString(), state.ID.ValueString()); err != nil {
+	if err := r.client.DeleteCheck(ctx, state.ProjectID.ValueString(), state.ProjectAPIKey.ValueString(), state.ID.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Unable to Delete Check", err.Error())
 	}
 }

@@ -3,9 +3,10 @@ resource "healthchecks_project" "example" {
 }
 
 resource "healthchecks_integration" "webhook" {
-  project_id = healthchecks_project.example.id
-  type       = "webhook"
-  name       = "Checks Webhook"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "webhook"
+  name            = "Checks Webhook"
 
   webhook = {
     method_down = "POST"
@@ -18,11 +19,12 @@ resource "healthchecks_integration" "webhook" {
 }
 
 resource "healthchecks_check" "example" {
-  project_id = healthchecks_project.example.id
-  name       = "nightly-job"
-  slug       = "nightly-job"
-  timeout    = 3600
-  grace      = 300
-  tags       = ["batch", "nightly"]
-  channels   = [healthchecks_integration.webhook.id]
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  name            = "nightly-job"
+  slug            = "nightly-job"
+  timeout         = 3600
+  grace           = 300
+  tags            = ["batch", "nightly"]
+  channels        = [healthchecks_integration.webhook.id]
 }

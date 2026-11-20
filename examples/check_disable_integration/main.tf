@@ -3,9 +3,10 @@ resource "healthchecks_project" "example" {
 }
 
 resource "healthchecks_integration" "webhook" {
-  project_id = healthchecks_project.example.id
-  type       = "webhook"
-  name       = "Disable Demo Webhook"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "webhook"
+  name            = "Disable Demo Webhook"
 
   webhook = {
     method_down = "POST"
@@ -16,13 +17,15 @@ resource "healthchecks_integration" "webhook" {
 }
 
 resource "healthchecks_check" "enabled" {
-  project_id = healthchecks_project.example.id
-  name       = "job-with-webhook"
-  channels   = [healthchecks_integration.webhook.id]
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  name            = "job-with-webhook"
+  channels        = [healthchecks_integration.webhook.id]
 }
 
 resource "healthchecks_check" "disabled" {
-  project_id = healthchecks_project.example.id
-  name       = "job-without-webhook"
-  channels   = []
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  name            = "job-without-webhook"
+  channels        = []
 }

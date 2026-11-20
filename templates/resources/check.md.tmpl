@@ -20,6 +20,6 @@ Import is supported using the following syntax:
 
 ## Notes
 
-- `project_id` selects which project API key is used for API requests.
+- Set `project_id` from `healthchecks_project.<name>.id` and `project_api_key` from `healthchecks_project.<name>.api_key`. This passes the key to the check even when Terraform starts a new provider process for apply.
 - `channels` accepts Healthchecks integration/channel IDs to enable notifications for the check.
 - Set `channels = []` to detach all integrations from a check.

@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -8,6 +10,64 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestDownstreamOperationsDoNotRotateProjectKey(t *testing.T) {
+	for _, test := range []struct {
+		name, key, diagnostic string
+		expectedRequests      int
+	}{
+		{name: "missing", diagnostic: "no read-write API key available"},
+		{name: "rejected", key: "stale-key", diagnostic: "read-write API key rejected", expectedRequests: 4},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c, err := New(Config{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.loggedIn = true
+			c.RememberProjectAPIKey("project", test.key)
+
+			requests := 0
+			c.http.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				requests++
+				if req.Method != http.MethodGet || !strings.HasPrefix(req.URL.Path, "/api/v3/") {
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+				}
+				if req.Header.Get("X-Api-Key") != test.key {
+					t.Fatal("request did not use the stored key")
+				}
+				return &http.Response{
+					StatusCode: http.StatusUnauthorized,
+					Body:       io.NopCloser(strings.NewReader("")),
+				}, nil
+			})
+
+			ctx := context.Background()
+			in := Integration{ProjectID: "project"}
+			_, checkErr := c.GetCheck(ctx, "project", "", "check")
+			_, channelsErr := c.ListChannels(ctx, "project", "")
+			_, webhookErr := c.CreateWebhookIntegration(ctx, in)
+			_, emailErr := c.CreateEmailIntegration(ctx, in)
+			for _, err := range []error{checkErr, channelsErr, webhookErr, emailErr} {
+				if err == nil || !strings.Contains(err.Error(), test.diagnostic) {
+					t.Errorf("got %v, want diagnostic containing %q", err, test.diagnostic)
+				}
+			}
+			if requests != test.expectedRequests {
+				t.Errorf("got %d requests, want %d", requests, test.expectedRequests)
+			}
+			if c.cachedProjectAPIKey("project") != test.key {
+				t.Error("downstream operation changed the cached project key")
+			}
+		})
+	}
+}
 
 func TestProjectIDFromLocation(t *testing.T) {
 	got, err := projectIDFromLocation("/projects/123e4567-e89b-12d3-a456-426614174000/checks/")

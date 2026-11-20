@@ -17,9 +17,10 @@ resource "healthchecks_project" "smoke" {
 }
 
 resource "healthchecks_integration" "webhook" {
-  project_id = healthchecks_project.smoke.id
-  type       = "webhook"
-  name       = "smoke-webhook"
+  project_id      = healthchecks_project.smoke.id
+  project_api_key = healthchecks_project.smoke.api_key
+  type            = "webhook"
+  name            = "smoke-webhook"
 
   webhook = {
     method_down = "POST"
@@ -32,8 +33,9 @@ resource "healthchecks_integration" "webhook" {
 }
 
 resource "healthchecks_integration" "email" {
-  project_id = healthchecks_project.smoke.id
-  type       = "email"
+  project_id      = healthchecks_project.smoke.id
+  project_api_key = healthchecks_project.smoke.api_key
+  type            = "email"
 
   config = {
     value = var.email_integration_address
@@ -43,11 +45,12 @@ resource "healthchecks_integration" "email" {
 }
 
 resource "healthchecks_check" "with_both" {
-  project_id = healthchecks_project.smoke.id
-  name       = "project-integrations-smoke"
-  slug       = "project-integrations-smoke"
-  timeout    = 3600
-  grace      = 300
+  project_id      = healthchecks_project.smoke.id
+  project_api_key = healthchecks_project.smoke.api_key
+  name            = "project-integrations-smoke"
+  slug            = "project-integrations-smoke"
+  timeout         = 3600
+  grace           = 300
   channels = [
     healthchecks_integration.webhook.id,
     healthchecks_integration.email.id,

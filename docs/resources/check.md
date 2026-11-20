@@ -9,9 +9,10 @@ resource "healthchecks_project" "example" {
 }
 
 resource "healthchecks_integration" "webhook" {
-  project_id = healthchecks_project.example.id
-  type       = "webhook"
-  name       = "Checks Webhook"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "webhook"
+  name            = "Checks Webhook"
 
   webhook = {
     method_down = "POST"
@@ -24,13 +25,14 @@ resource "healthchecks_integration" "webhook" {
 }
 
 resource "healthchecks_check" "example" {
-  project_id = healthchecks_project.example.id
-  name       = "nightly-job"
-  slug       = "nightly-job"
-  timeout    = 3600
-  grace      = 300
-  tags       = ["batch", "nightly"]
-  channels   = [healthchecks_integration.webhook.id]
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  name            = "nightly-job"
+  slug            = "nightly-job"
+  timeout         = 3600
+  grace           = 300
+  tags            = ["batch", "nightly"]
+  channels        = [healthchecks_integration.webhook.id]
 }
 ```
 
@@ -47,6 +49,7 @@ resource "healthchecks_check" "example" {
 - `channels` (List of String)
 - `desc` (String)
 - `grace` (Number)
+- `project_api_key` (String, Sensitive) Read-write API key for the project. Reference the project resource's api_key to supply the key across Terraform plan and apply.
 - `schedule` (String)
 - `slug` (String)
 - `tags` (List of String)
@@ -71,6 +74,6 @@ terraform import healthchecks_check.example 1c580c01-499d-4832-a928-3a407d42575c
 
 ## Notes
 
-- `project_id` selects which project API key is used for API requests.
+- Set `project_id` from `healthchecks_project.<name>.id` and `project_api_key` from `healthchecks_project.<name>.api_key`. This passes the key to the check even when Terraform starts a new provider process for apply.
 - `channels` accepts Healthchecks integration/channel IDs to enable notifications for the check.
 - Set `channels = []` to detach all integrations from a check.

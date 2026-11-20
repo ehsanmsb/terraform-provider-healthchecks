@@ -13,16 +13,17 @@ provider "healthchecks" {
 }
 
 resource "healthchecks_project" "example" {
-  name = var.project_name
+  name                      = var.project_name
   api_key_enabled           = var.api_key_enabled
   read_only_api_key_enabled = var.read_only_api_key_enabled
   ping_key_enabled          = var.ping_key_enabled
 }
 
 resource "healthchecks_integration" "webhook" {
-  project_id = healthchecks_project.example.id
-  type       = "webhook"
-  name       = "project-webhook"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "webhook"
+  name            = "project-webhook"
 
   webhook = {
     method_down = "POST"
@@ -35,8 +36,9 @@ resource "healthchecks_integration" "webhook" {
 }
 
 resource "healthchecks_integration" "email" {
-  project_id = healthchecks_project.example.id
-  type       = "email"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "email"
 
   config = {
     value = var.email_integration_address
@@ -74,13 +76,14 @@ locals {
 }
 
 resource "healthchecks_check" "job" {
-  for_each   = local.checks
-  project_id = healthchecks_project.example.id
-  name       = each.value.name
-  slug       = each.value.slug
-  timeout    = 3600
-  grace      = 300
-  tags       = each.value.tags
+  for_each        = local.checks
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  name            = each.value.name
+  slug            = each.value.slug
+  timeout         = 3600
+  grace           = 300
+  tags            = each.value.tags
   channels = [
     healthchecks_integration.webhook.id,
     healthchecks_integration.email.id,
