@@ -52,7 +52,7 @@ func (r *checkResource) Metadata(_ context.Context, req resource.MetadataRequest
 
 func (r *checkResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages a Healthchecks check using the Management API v3. The check uses the read-write API key managed by the linked healthchecks_project resource.",
+		MarkdownDescription: "Manages a Healthchecks check using the Management API v3. The check uses a read-write key for its project, supplied by project_api_key or the provider api_key.",
 		Attributes: map[string]schema.Attribute{
 			"id":         schema.StringAttribute{Computed: true},
 			"project_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
@@ -62,13 +62,13 @@ func (r *checkResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 				MarkdownDescription: "Read-write API key for the project. Reference the project resource's api_key to supply the key across Terraform plan and apply.",
 			},
 			"name":     schema.StringAttribute{Required: true},
-			"slug":     schema.StringAttribute{Optional: true},
+			"slug":     schema.StringAttribute{Optional: true, Computed: true},
 			"tags":     schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, nil))},
 			"desc":     schema.StringAttribute{Optional: true},
-			"timeout":  schema.Int64Attribute{Optional: true},
-			"grace":    schema.Int64Attribute{Optional: true},
+			"timeout":  schema.Int64Attribute{Optional: true, Computed: true},
+			"grace":    schema.Int64Attribute{Optional: true, Computed: true},
 			"schedule": schema.StringAttribute{Optional: true},
-			"tz":       schema.StringAttribute{Optional: true},
+			"tz":       schema.StringAttribute{Optional: true, Computed: true},
 			"channels": schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, nil))},
 			"uuid":     schema.StringAttribute{Computed: true},
 			"ping_url": schema.StringAttribute{Computed: true},
@@ -167,10 +167,10 @@ func buildPayload(m model) map[string]any {
 	if !m.Desc.IsNull() {
 		payload["desc"] = m.Desc.ValueString()
 	}
-	if !m.Timeout.IsNull() {
+	if !m.Timeout.IsNull() && !m.Timeout.IsUnknown() {
 		payload["timeout"] = m.Timeout.ValueInt64()
 	}
-	if !m.Grace.IsNull() {
+	if !m.Grace.IsNull() && !m.Grace.IsUnknown() {
 		payload["grace"] = m.Grace.ValueInt64()
 	}
 	if !m.Schedule.IsNull() && m.Schedule.ValueString() != "" {
@@ -205,12 +205,16 @@ func applyCheckToState(state *model, check *client.Check) {
 	state.PingURL = types.StringValue(check.PingURL)
 	if check.Timeout != nil {
 		state.Timeout = types.Int64Value(*check.Timeout)
+	} else if state.Timeout.IsUnknown() {
+		state.Timeout = types.Int64Null()
 	}
 	if check.Schedule != nil {
 		state.Schedule = types.StringValue(*check.Schedule)
 	}
 	if check.TZ != nil {
 		state.TZ = types.StringValue(*check.TZ)
+	} else if state.TZ.IsUnknown() {
+		state.TZ = types.StringNull()
 	}
 	state.Tags = splitSpaceList(check.Tags)
 	state.Channels = normalizeChannels(state.Channels, check.Channels)

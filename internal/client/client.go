@@ -20,16 +20,20 @@ import (
 )
 
 var (
-	errNotFound       = errors.New("not found")
-	errForbidden      = errors.New("forbidden")
-	errUnauthorized   = errors.New("unauthorized")
-	errUnexpectedAuth = errors.New("unexpected authentication flow")
+	errNotFound         = errors.New("not found")
+	errForbidden        = errors.New("forbidden")
+	errUnauthorized     = errors.New("unauthorized")
+	errUnexpectedAuth   = errors.New("unexpected authentication flow")
+	errLoginRateLimited = errors.New("Healthchecks password login rate limit reached. Wait before running Terraform again.")
 )
+
+const loginPath = "/accounts/login/"
 
 type Config struct {
 	BaseURL            string
 	Username           string
 	Password           string
+	APIKey             string
 	InsecureSkipVerify bool
 	Timeout            time.Duration
 	UserAgent          string
@@ -39,12 +43,16 @@ type Client struct {
 	baseURL   *url.URL
 	username  string
 	password  string
+	apiKey    string
 	http      *http.Client
 	userAgent string
 
+	loginMu          sync.Mutex
+	loggedIn         bool
+	loginRateLimited bool
+
 	integrationCreateMu sync.Mutex
 	mu                  sync.Mutex
-	loggedIn            bool
 	projectAPIKeys      map[string]string
 }
 
@@ -133,6 +141,7 @@ func New(cfg Config) (*Client, error) {
 		baseURL:  u,
 		username: cfg.Username,
 		password: cfg.Password,
+		apiKey:   cfg.APIKey,
 		http: &http.Client{
 			Timeout: timeout,
 			Jar:     jar,
@@ -161,15 +170,22 @@ func (c *Client) ForgetProjectAPIKey(projectID string) {
 }
 
 func (c *Client) Login(ctx context.Context) error {
-	c.mu.Lock()
+	c.loginMu.Lock()
+	defer c.loginMu.Unlock()
+
 	if c.loggedIn {
-		c.mu.Unlock()
 		return nil
 	}
-	c.mu.Unlock()
+	if c.username == "" || c.password == "" {
+		return errors.New("this operation requires a Healthchecks web session. Configure the provider with username and password.")
+	}
+	if c.loginRateLimited {
+		return errLoginRateLimited
+	}
 
-	doc, err := c.getDocument(ctx, "/accounts/login/")
+	doc, err := c.getDocument(ctx, loginPath)
 	if err != nil {
+		c.loginRateLimited = errors.Is(err, errLoginRateLimited)
 		return err
 	}
 
@@ -183,12 +199,16 @@ func (c *Client) Login(ctx context.Context) error {
 		"email":    {c.username},
 		"password": {c.password},
 	}
-	res, body, err := c.postForm(ctx, "/accounts/login/", values, token)
+	res, body, err := c.postForm(ctx, loginPath, values, token)
 	if err != nil {
 		return err
 	}
 	defer res.Body.Close()
 
+	if res.StatusCode == http.StatusTooManyRequests || strings.Contains(body, "Too many attempts") {
+		c.loginRateLimited = true
+		return errLoginRateLimited
+	}
 	if res.StatusCode >= 400 {
 		return fmt.Errorf("login failed with status %d", res.StatusCode)
 	}
@@ -199,13 +219,11 @@ func (c *Client) Login(ctx context.Context) error {
 	if strings.Contains(body, "/accounts/login/two_factor/") || strings.Contains(body, "login_webauthn") || strings.Contains(body, "login_totp") {
 		return errUnexpectedAuth
 	}
-	if (res.Request != nil && res.Request.URL != nil && strings.HasSuffix(res.Request.URL.Path, "/accounts/login/")) || strings.Contains(body, `id="login-form"`) {
+	if (res.Request != nil && res.Request.URL != nil && strings.HasSuffix(res.Request.URL.Path, loginPath)) || strings.Contains(body, `id="login-form"`) {
 		return errUnauthorized
 	}
 
-	c.mu.Lock()
 	c.loggedIn = true
-	c.mu.Unlock()
 	return nil
 }
 
@@ -540,6 +558,9 @@ func (c *Client) GetCheck(ctx context.Context, projectID, apiKey, checkID string
 	}); err != nil {
 		return nil, err
 	}
+	if resp.ID == "" {
+		return nil, errors.New("Healthchecks did not return the check UUID. Verify that you are using a read-write project API key.")
+	}
 	return &resp, nil
 }
 
@@ -592,11 +613,17 @@ func (c *Client) withProjectAPIKey(projectID, apiKey string, fn func(apiKey stri
 		apiKey = c.cachedProjectAPIKey(projectID)
 	}
 	if apiKey == "" {
-		return fmt.Errorf("no read-write API key available for project %q; set project_api_key to the project's read-write key", projectID)
+		apiKey = c.apiKey
+	}
+	if apiKey == "" {
+		return fmt.Errorf("no read-write API key available for project %q; set project_api_key or configure the provider with api_key", projectID)
 	}
 
 	err := fn(apiKey)
 	if errors.Is(err, errUnauthorized) {
+		if c.apiKey != "" {
+			return fmt.Errorf("read-write API key rejected for project %q; verify the configured api_key or project_api_key: %w", projectID, err)
+		}
 		return fmt.Errorf("read-write API key rejected for project %q; reconcile api_key_enabled on the healthchecks_project resource: %w", projectID, err)
 	}
 	return err
@@ -878,6 +905,9 @@ func (c *Client) getDocument(ctx context.Context, p string) (*goquery.Document, 
 		return nil, err
 	}
 	defer res.Body.Close()
+	if p == loginPath && res.StatusCode == http.StatusTooManyRequests {
+		return nil, errLoginRateLimited
+	}
 	if res.StatusCode == http.StatusNotFound {
 		return nil, errNotFound
 	}
@@ -971,18 +1001,33 @@ func (c *Client) do(req *http.Request) (*http.Response, error) {
 	var res *http.Response
 	var err error
 	backoff := 500 * time.Millisecond
+	loginRequest := req.URL.Path == c.resolveURL(loginPath).Path
 	for attempt := 0; attempt < 4; attempt++ {
 		res, err = c.http.Do(req)
 		if err != nil {
 			return nil, err
 		}
-		if res.StatusCode != http.StatusTooManyRequests || attempt == 3 {
+		if res.StatusCode != http.StatusTooManyRequests || attempt == 3 || loginRequest || (req.Body != nil && req.GetBody == nil) {
 			return res, nil
 		}
 		io.Copy(io.Discard, res.Body)
 		res.Body.Close()
-		time.Sleep(backoff)
+
+		select {
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		case <-time.After(backoff):
+		}
 		backoff *= 2
+
+		if req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, err
+			}
+			req = req.Clone(req.Context())
+			req.Body = body
+		}
 	}
 	return res, err
 }
