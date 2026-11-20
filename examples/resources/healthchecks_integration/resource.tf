@@ -3,9 +3,10 @@ resource "healthchecks_project" "example" {
 }
 
 resource "healthchecks_integration" "webhook" {
-  project_id = healthchecks_project.example.id
-  type       = "webhook"
-  name       = "Primary Webhook"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "webhook"
+  name            = "Primary Webhook"
 
   webhook = {
     method_down = "POST"
@@ -26,8 +27,9 @@ resource "healthchecks_integration" "webhook" {
 }
 
 resource "healthchecks_integration" "email" {
-  project_id = healthchecks_project.example.id
-  type       = "email"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "email"
 
   config = {
     value = "alerts@example.com"

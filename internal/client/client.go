@@ -94,11 +94,12 @@ type Channel struct {
 }
 
 type Integration struct {
-	ID        string
-	ProjectID string
-	Type      string
-	Name      string
-	Config    map[string]string
+	ProjectAPIKey string
+	ID            string
+	ProjectID     string
+	Type          string
+	Name          string
+	Config        map[string]string
 }
 
 type ProjectMember struct {
@@ -283,7 +284,8 @@ func (c *Client) GetProject(ctx context.Context, projectID, stateAPIKey, stateRe
 				c.RememberProjectAPIKey(projectID, stateAPIKey)
 			}
 		}
-	} else {
+	}
+	if !project.APIKeyEnabled {
 		c.ForgetProjectAPIKey(projectID)
 	}
 
@@ -527,9 +529,13 @@ func (c *Client) toggleProjectKey(ctx context.Context, projectID, keyName string
 	return nil
 }
 
-func (c *Client) GetCheck(ctx context.Context, projectID, checkID string) (*Check, error) {
+func (c *Client) GetCheck(ctx context.Context, projectID, apiKey, checkID string) (*Check, error) {
+	// Refresh can see a key that the project resource already reconciled.
+	if current := c.cachedProjectAPIKey(projectID); current != "" {
+		apiKey = current
+	}
 	var resp Check
-	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+	if err := c.withProjectAPIKey(projectID, apiKey, func(apiKey string) error {
 		return c.apiJSON(ctx, http.MethodGet, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, nil, &resp)
 	}); err != nil {
 		return nil, err
@@ -537,9 +543,9 @@ func (c *Client) GetCheck(ctx context.Context, projectID, checkID string) (*Chec
 	return &resp, nil
 }
 
-func (c *Client) CreateCheck(ctx context.Context, projectID string, payload map[string]any) (*Check, error) {
+func (c *Client) CreateCheck(ctx context.Context, projectID, apiKey string, payload map[string]any) (*Check, error) {
 	var wrapper Check
-	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+	if err := c.withProjectAPIKey(projectID, apiKey, func(apiKey string) error {
 		return c.apiJSON(ctx, http.MethodPost, "/api/v3/checks/", apiKey, payload, &wrapper)
 	}); err != nil {
 		return nil, err
@@ -547,9 +553,9 @@ func (c *Client) CreateCheck(ctx context.Context, projectID string, payload map[
 	return &wrapper, nil
 }
 
-func (c *Client) UpdateCheck(ctx context.Context, projectID, checkID string, payload map[string]any) (*Check, error) {
+func (c *Client) UpdateCheck(ctx context.Context, projectID, apiKey, checkID string, payload map[string]any) (*Check, error) {
 	var check Check
-	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+	if err := c.withProjectAPIKey(projectID, apiKey, func(apiKey string) error {
 		return c.apiJSON(ctx, http.MethodPost, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, payload, &check)
 	}); err != nil {
 		return nil, err
@@ -557,8 +563,8 @@ func (c *Client) UpdateCheck(ctx context.Context, projectID, checkID string, pay
 	return &check, nil
 }
 
-func (c *Client) DeleteCheck(ctx context.Context, projectID, checkID string) error {
-	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+func (c *Client) DeleteCheck(ctx context.Context, projectID, apiKey, checkID string) error {
+	if err := c.withProjectAPIKey(projectID, apiKey, func(apiKey string) error {
 		return c.apiJSON(ctx, http.MethodDelete, fmt.Sprintf("/api/v3/checks/%s", checkID), apiKey, nil, nil)
 	}); err != nil {
 		if errors.Is(err, errNotFound) {
@@ -569,11 +575,11 @@ func (c *Client) DeleteCheck(ctx context.Context, projectID, checkID string) err
 	return nil
 }
 
-func (c *Client) ListChannels(ctx context.Context, projectID string) ([]Channel, error) {
+func (c *Client) ListChannels(ctx context.Context, projectID, apiKey string) ([]Channel, error) {
 	var resp struct {
 		Channels []Channel `json:"channels"`
 	}
-	if err := c.withProjectAPIKeyRetry(ctx, projectID, func(apiKey string) error {
+	if err := c.withProjectAPIKey(projectID, apiKey, func(apiKey string) error {
 		return c.apiJSON(ctx, http.MethodGet, "/api/v3/channels/", apiKey, nil, &resp)
 	}); err != nil {
 		return nil, err
@@ -581,24 +587,19 @@ func (c *Client) ListChannels(ctx context.Context, projectID string) ([]Channel,
 	return resp.Channels, nil
 }
 
-func (c *Client) withProjectAPIKeyRetry(ctx context.Context, projectID string, fn func(apiKey string) error) error {
-	apiKey, err := c.EnsureProjectAPIKey(ctx, projectID)
-	if err != nil {
-		return err
+func (c *Client) withProjectAPIKey(projectID, apiKey string, fn func(apiKey string) error) error {
+	if apiKey == "" {
+		apiKey = c.cachedProjectAPIKey(projectID)
+	}
+	if apiKey == "" {
+		return fmt.Errorf("no read-write API key available for project %q; set project_api_key to the project's read-write key", projectID)
 	}
 
-	err = fn(apiKey)
-	if !errors.Is(err, errUnauthorized) {
-		return err
+	err := fn(apiKey)
+	if errors.Is(err, errUnauthorized) {
+		return fmt.Errorf("read-write API key rejected for project %q; reconcile api_key_enabled on the healthchecks_project resource: %w", projectID, err)
 	}
-
-	c.ForgetProjectAPIKey(projectID)
-	apiKey, err = c.EnsureProjectAPIKey(ctx, projectID)
-	if err != nil {
-		return err
-	}
-
-	return fn(apiKey)
+	return err
 }
 
 func (c *Client) CreateWebhookIntegration(ctx context.Context, in Integration) (*Integration, error) {
@@ -606,7 +607,10 @@ func (c *Client) CreateWebhookIntegration(ctx context.Context, in Integration) (
 		return nil, err
 	}
 
-	before, _ := c.ListChannels(ctx, in.ProjectID)
+	before, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
+	if err != nil {
+		return nil, err
+	}
 	doc, err := c.getDocument(ctx, fmt.Sprintf("/projects/%s/add_webhook/", in.ProjectID))
 	if err != nil {
 		return nil, err
@@ -620,7 +624,7 @@ func (c *Client) CreateWebhookIntegration(ctx context.Context, in Integration) (
 		return nil, err
 	}
 
-	after, err := c.ListChannels(ctx, in.ProjectID)
+	after, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
 	if err != nil {
 		return nil, err
 	}
@@ -637,7 +641,10 @@ func (c *Client) CreateEmailIntegration(ctx context.Context, in Integration) (*I
 		return nil, err
 	}
 
-	before, _ := c.ListChannels(ctx, in.ProjectID)
+	before, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
+	if err != nil {
+		return nil, err
+	}
 	doc, err := c.getDocument(ctx, fmt.Sprintf("/projects/%s/add_email/", in.ProjectID))
 	if err != nil {
 		return nil, err
@@ -652,7 +659,7 @@ func (c *Client) CreateEmailIntegration(ctx context.Context, in Integration) (*I
 		return nil, err
 	}
 
-	after, err := c.ListChannels(ctx, in.ProjectID)
+	after, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
 	if err != nil {
 		return nil, err
 	}
@@ -949,13 +956,6 @@ func (c *Client) apiJSON(ctx context.Context, method, p, apiKey string, payload 
 		return errForbidden
 	}
 	if res.StatusCode == http.StatusUnauthorized {
-		c.mu.Lock()
-		for id, key := range c.projectAPIKeys {
-			if key == apiKey {
-				delete(c.projectAPIKeys, id)
-			}
-		}
-		c.mu.Unlock()
 		return errUnauthorized
 	}
 	if res.StatusCode >= 400 {

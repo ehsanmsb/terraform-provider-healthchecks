@@ -20,6 +20,8 @@ Import is supported using the following syntax:
 
 ## Notes
 
+- Set `project_api_key` from `healthchecks_project.<name>.api_key` so the provider can identify the new channel during apply.
+
 - Use `type = "webhook"` for HTTP callbacks on up/down events.
 - Webhook integrations support the optional top-level `name` attribute and the structured `webhook` block.
 - Webhook request headers can be configured with `webhook.headers_down` and `webhook.headers_up` as maps of header names to values.

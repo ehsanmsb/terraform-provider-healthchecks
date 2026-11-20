@@ -49,19 +49,21 @@ locals {
 }
 
 resource "healthchecks_check" "job" {
-  for_each   = local.checks
-  project_id = healthchecks_project.smoke.id
-  name       = each.value.name
-  slug       = each.value.slug
-  timeout    = 3600
-  grace      = 300
-  tags       = ["local", "smoke"]
+  for_each        = local.checks
+  project_id      = healthchecks_project.smoke.id
+  project_api_key = healthchecks_project.smoke.api_key
+  name            = each.value.name
+  slug            = each.value.slug
+  timeout         = 3600
+  grace           = 300
+  tags            = ["local", "smoke"]
 }
 
 resource "healthchecks_integration" "webhook" {
-  project_id = healthchecks_project.smoke.id
-  type       = "webhook"
-  name       = "webhook-smoke"
+  project_id      = healthchecks_project.smoke.id
+  project_api_key = healthchecks_project.smoke.api_key
+  type            = "webhook"
+  name            = "webhook-smoke"
 
   webhook = {
     method_down = "POST"

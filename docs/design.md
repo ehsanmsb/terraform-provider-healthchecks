@@ -29,5 +29,5 @@ Implementation note:
 
 - Checks use the public Management API v3.
 - Projects, integrations, and project members use authenticated web forms because upstream does not currently expose equivalent public project-management endpoints.
-- The provider may generate a new project RW API key when it cannot recover a plaintext key from state or the current response body. This is necessary because Healthchecks stores hashed API keys server-side.
+- The project resource manages the lifecycle of the read-write key and saves it in state. Downstream Management API operations use that key and report missing or rejected credentials without rotating the key.
 - Read-only API keys and Ping keys are treated as sensitive Terraform attributes as well, but the provider does not expose them in example outputs by default.

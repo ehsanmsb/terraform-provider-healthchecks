@@ -9,9 +9,10 @@ resource "healthchecks_project" "example" {
 }
 
 resource "healthchecks_integration" "webhook" {
-  project_id = healthchecks_project.example.id
-  type       = "webhook"
-  name       = "Primary Webhook"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "webhook"
+  name            = "Primary Webhook"
 
   webhook = {
     method_down = "POST"
@@ -32,8 +33,9 @@ resource "healthchecks_integration" "webhook" {
 }
 
 resource "healthchecks_integration" "email" {
-  project_id = healthchecks_project.example.id
-  type       = "email"
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "email"
 
   config = {
     value = "alerts@example.com"
@@ -55,6 +57,7 @@ resource "healthchecks_integration" "email" {
 
 - `config` (Map of String) Legacy generic integration config map. Still supported for `type = "email"` and webhook backward compatibility, but the `webhook` block is the preferred interface for webhook integrations.
 - `name` (String)
+- `project_api_key` (String, Sensitive) Read-write API key used to identify the channel after creating the integration. Reference the project resource's api_key.
 - `webhook` (Attributes) Structured webhook configuration. Preferred over the legacy `config` map for `type = "webhook"`. (see [below for nested schema](#nestedatt--webhook))
 
 ### Read-Only
@@ -86,6 +89,8 @@ terraform import healthchecks_integration.webhook 1c580c01-499d-4832-a928-3a407d
 ```
 
 ## Notes
+
+- Set `project_api_key` from `healthchecks_project.<name>.api_key` so the provider can identify the new channel during apply.
 
 - Use `type = "webhook"` for HTTP callbacks on up/down events.
 - Webhook integrations support the optional top-level `name` attribute and the structured `webhook` block.
