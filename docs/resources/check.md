@@ -74,6 +74,7 @@ terraform import healthchecks_check.example 1c580c01-499d-4832-a928-3a407d42575c
 
 ## Notes
 
-- Set `project_id` from `healthchecks_project.<name>.id` and `project_api_key` from `healthchecks_project.<name>.api_key`. This passes the key to the check even when Terraform starts a new provider process for apply.
+- With a managed project, set `project_id` from `healthchecks_project.<name>.id` and `project_api_key` from `healthchecks_project.<name>.api_key`. For an existing project, set a read-write `api_key` on the provider and use the ID of the project that issued the key.
+- Healthchecks supplies defaults for omitted values such as `grace`, `timeout`, and `tz` where applicable.
 - `channels` accepts Healthchecks integration/channel IDs to enable notifications for the check.
 - Set `channels = []` to detach all integrations from a check.

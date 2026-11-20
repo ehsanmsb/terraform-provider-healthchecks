@@ -32,6 +32,7 @@ type providerModel struct {
 	BaseURL            types.String `tfsdk:"base_url"`
 	Username           types.String `tfsdk:"username"`
 	Password           types.String `tfsdk:"password"`
+	APIKey             types.String `tfsdk:"api_key"`
 	InsecureSkipVerify types.Bool   `tfsdk:"insecure_skip_verify"`
 	Timeout            types.String `tfsdk:"timeout"`
 }
@@ -49,14 +50,19 @@ func (p *healthchecksProvider) Schema(_ context.Context, _ provider.SchemaReques
 				MarkdownDescription: "Base URL of the Healthchecks instance.",
 			},
 			"username": schema.StringAttribute{
-				Required:            true,
+				Optional:            true,
 				Sensitive:           true,
 				MarkdownDescription: "Healthchecks account email/username for web-session login.",
 			},
 			"password": schema.StringAttribute{
-				Required:            true,
+				Optional:            true,
 				Sensitive:           true,
 				MarkdownDescription: "Healthchecks account password for web-session login.",
+			},
+			"api_key": schema.StringAttribute{
+				Optional:            true,
+				Sensitive:           true,
+				MarkdownDescription: "Read-write API key for one existing Healthchecks project. Use instead of username and password for check management.",
 			},
 			"insecure_skip_verify": schema.BoolAttribute{
 				Optional:            true,
@@ -77,6 +83,24 @@ func (p *healthchecksProvider) Configure(ctx context.Context, req provider.Confi
 		return
 	}
 
+	if data.BaseURL.IsUnknown() {
+		resp.Diagnostics.AddAttributeError(path.Root("base_url"), "Unknown Healthchecks Base URL", "Set the Healthchecks instance URL to a value known before planning.")
+		return
+	}
+
+	username, password, apiKey := data.Username.ValueString(), data.Password.ValueString(), data.APIKey.ValueString()
+	switch {
+	case data.Username.IsUnknown() || data.Password.IsUnknown() || data.APIKey.IsUnknown():
+		resp.Diagnostics.AddError("Unknown Healthchecks Credentials", "Configure credentials using values known before planning.")
+		return
+	case apiKey != "" && (username != "" || password != ""):
+		resp.Diagnostics.AddAttributeError(path.Root("api_key"), "Conflicting Healthchecks Credentials", "Use api_key or username and password.")
+		return
+	case apiKey == "" && (username == "" || password == ""):
+		resp.Diagnostics.AddError("Missing Healthchecks Credentials", "Set api_key for Management API access, or set both username and password for web access.")
+		return
+	}
+
 	timeout := 30 * time.Second
 	if !data.Timeout.IsNull() && !data.Timeout.IsUnknown() {
 		parsed, err := time.ParseDuration(data.Timeout.ValueString())
@@ -89,19 +113,15 @@ func (p *healthchecksProvider) Configure(ctx context.Context, req provider.Confi
 
 	httpClient, err := client.New(client.Config{
 		BaseURL:            data.BaseURL.ValueString(),
-		Username:           data.Username.ValueString(),
-		Password:           data.Password.ValueString(),
+		Username:           username,
+		Password:           password,
+		APIKey:             apiKey,
 		InsecureSkipVerify: !data.InsecureSkipVerify.IsNull() && data.InsecureSkipVerify.ValueBool(),
 		Timeout:            timeout,
 		UserAgent:          fmt.Sprintf("terraform-provider-healthchecks/%s", "dev"),
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Configure Healthchecks Client", err.Error())
-		return
-	}
-
-	if err := httpClient.Login(ctx); err != nil {
-		resp.Diagnostics.AddError("Unable to Authenticate to Healthchecks", err.Error())
 		return
 	}
 

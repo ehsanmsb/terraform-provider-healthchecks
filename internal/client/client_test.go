@@ -2,10 +2,13 @@ package client
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
@@ -327,5 +330,122 @@ func TestCreatedChannelIDMatchesKindAndRejectsAmbiguity(t *testing.T) {
 	}
 	if got, err := createdChannelID(before, after, "unknown"); err == nil || got != "" {
 		t.Fatalf("missing channel ID = %q, err = %v", got, err)
+	}
+}
+
+func TestLoginSharesOneAttempt(t *testing.T) {
+	cases := []struct {
+		name, body            string
+		getStatus, postStatus int
+		want                  error
+	}{
+		{name: "success", getStatus: http.StatusOK, postStatus: http.StatusOK},
+		{name: "rate limit form", getStatus: http.StatusOK, postStatus: http.StatusOK, body: "Too many attempts, please try later.", want: errLoginRateLimited},
+		{name: "rate limit POST", getStatus: http.StatusOK, postStatus: http.StatusTooManyRequests, want: errLoginRateLimited},
+		{name: "rate limit GET", getStatus: http.StatusTooManyRequests, want: errLoginRateLimited},
+		{name: "bad password", getStatus: http.StatusOK, postStatus: http.StatusOK, body: "Incorrect email or password", want: errUnauthorized},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := New(Config{Username: "user@example.com", Password: "password"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var gets, posts atomic.Int32
+			c.http.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				res := &http.Response{Request: req}
+				if req.Method == http.MethodGet {
+					gets.Add(1)
+					res.StatusCode = tc.getStatus
+					res.Body = io.NopCloser(strings.NewReader(`<input name="csrfmiddlewaretoken" value="test-token">`))
+					return res, nil
+				}
+				posts.Add(1)
+				req.Body.Close()
+				res.StatusCode = tc.postStatus
+				res.Body = io.NopCloser(strings.NewReader(tc.body))
+				if tc.want == nil {
+					res.Request = &http.Request{URL: c.resolveURL("/projects/")}
+				}
+				return res, nil
+			})
+
+			var attempts sync.WaitGroup
+			callers := 8
+			if tc.want == errUnauthorized {
+				callers = 1
+			}
+			for range callers {
+				attempts.Add(1)
+				go func() {
+					defer attempts.Done()
+					if err := c.Login(context.Background()); !errors.Is(err, tc.want) {
+						t.Errorf("Login() error = %v, want %v", err, tc.want)
+					}
+				}()
+			}
+			attempts.Wait()
+
+			var wantPosts int32 = 1
+			if tc.getStatus == http.StatusTooManyRequests {
+				wantPosts = 0
+			}
+			if gets.Load() != 1 || posts.Load() != wantPosts {
+				t.Fatalf("login requests = %d GET, %d POST, want 1 GET, %d POST", gets.Load(), posts.Load(), wantPosts)
+			}
+		})
+	}
+}
+
+func TestDirectAPIKeySkipsWebLogin(t *testing.T) {
+	c, err := New(Config{APIKey: "provider-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wantKey string
+	c.http.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Path != "/api/v3/checks/check" {
+			t.Fatalf("unexpected request to %s", req.URL.Path)
+		}
+		if got := req.Header.Get("X-Api-Key"); got != wantKey {
+			t.Fatalf("API key = %q, want %q", got, wantKey)
+		}
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"uuid":"check"}`))}, nil
+	})
+	for _, tc := range []struct{ supplied, want string }{{"", "provider-key"}, {"override", "override"}} {
+		wantKey = tc.want
+		if _, err := c.GetCheck(context.Background(), "project", tc.supplied, "check"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.CreateProject(context.Background(), "project"); err == nil || !strings.Contains(err.Error(), "requires a Healthchecks web session") {
+		t.Fatalf("web operation with API key mode returned %v", err)
+	}
+}
+
+func TestHTTP429RetryReplaysPostBody(t *testing.T) {
+	c, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	requests := 0
+	c.http.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests++
+		defer req.Body.Close()
+		body, err := io.ReadAll(req.Body)
+		if err != nil || string(body) != `{"name":"example"}` {
+			t.Fatalf("request %d body = %q, err = %v", requests, body, err)
+		}
+		status := http.StatusTooManyRequests
+		if requests == 2 {
+			status = http.StatusCreated
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(`{"uuid":"check"}`))}, nil
+	})
+	if _, err := c.CreateCheck(context.Background(), "project", "api-key", map[string]any{"name": "example"}); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
 	}
 }

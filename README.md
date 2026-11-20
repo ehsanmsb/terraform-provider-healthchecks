@@ -27,6 +27,8 @@ go build ./...
 
 ## Provider Configuration
 
+Supply either `username` and `password` for web operations or `api_key` for checks in one existing project. API key authentication requires a read-write project key and the matching `project_id` on each check. See [provider authentication](docs/index.md#api-key-authentication) for configuration and password rate-limit behavior.
+
 Example:
 
 ```hcl
