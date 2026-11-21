@@ -7,7 +7,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -44,7 +44,7 @@ func (r *projectResource) Metadata(_ context.Context, req resource.MetadataReque
 
 func (r *projectResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages a Healthchecks project. Project operations use authenticated web endpoints, and the provider ensures a read-write project API key exists for downstream API usage.",
+		MarkdownDescription: "Manages a Healthchecks project. Project operations use authenticated web endpoints. New projects enable the read-write API key by default.",
 		Attributes: map[string]schema.Attribute{
 			"id":   schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"name": schema.StringAttribute{Required: true},
@@ -53,27 +53,27 @@ func (r *projectResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Sensitive: true,
 			},
 			"api_key_enabled": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(true),
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 			},
 			"read_only_api_key": schema.StringAttribute{
 				Computed:  true,
 				Sensitive: true,
 			},
 			"read_only_api_key_enabled": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(false),
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 			},
 			"ping_key": schema.StringAttribute{
 				Computed:  true,
 				Sensitive: true,
 			},
 			"ping_key_enabled": schema.BoolAttribute{
-				Optional: true,
-				Computed: true,
-				Default:  booldefault.StaticBool(false),
+				Optional:      true,
+				Computed:      true,
+				PlanModifiers: []planmodifier.Bool{boolplanmodifier.UseStateForUnknown()},
 			},
 		},
 	}
@@ -98,13 +98,22 @@ func (r *projectResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	project, err = r.reconcileProjectKeys(ctx, project.ID, plan, project)
+	if plan.APIKeyEnabled.IsUnknown() || plan.APIKeyEnabled.IsNull() {
+		plan.APIKeyEnabled = types.BoolValue(true)
+	}
+	if plan.ReadOnlyAPIKeyEnabled.IsUnknown() || plan.ReadOnlyAPIKeyEnabled.IsNull() {
+		plan.ReadOnlyAPIKeyEnabled = types.BoolValue(false)
+	}
+	if plan.PingKeyEnabled.IsUnknown() || plan.PingKeyEnabled.IsNull() {
+		plan.PingKeyEnabled = types.BoolValue(false)
+	}
+	project, err = r.reconcileProjectKeys(ctx, plan, project)
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Configure Project Keys", err.Error())
 		return
 	}
 
-	state := newProjectModel(plan, project)
+	state := newProjectModel(project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -130,7 +139,7 @@ func (r *projectResource) Read(ctx context.Context, req resource.ReadRequest, re
 		resp.Diagnostics.AddError("Unable to Read Project", err.Error())
 		return
 	}
-	state = newProjectModel(state, project)
+	state = newProjectModel(project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -142,17 +151,23 @@ func (r *projectResource) Update(ctx context.Context, req resource.UpdateRequest
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	project, err := r.client.UpdateProject(ctx, state.ID.ValueString(), plan.Name.ValueString())
+	project, err := r.client.UpdateProject(ctx, client.Project{
+		ID:             state.ID.ValueString(),
+		Name:           plan.Name.ValueString(),
+		APIKey:         state.APIKey.ValueString(),
+		ReadOnlyAPIKey: state.ReadOnlyAPIKey.ValueString(),
+		PingKey:        state.PingKey.ValueString(),
+	})
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Update Project", err.Error())
 		return
 	}
-	project, err = r.reconcileProjectKeys(ctx, state.ID.ValueString(), plan, project)
+	project, err = r.reconcileProjectKeys(ctx, plan, project)
 	if err != nil {
 		resp.Diagnostics.AddError("Unable to Configure Project Keys", err.Error())
 		return
 	}
-	state = newProjectModel(plan, project)
+	state = newProjectModel(project)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -171,66 +186,49 @@ func (r *projectResource) ImportState(ctx context.Context, req resource.ImportSt
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-func (r *projectResource) reconcileProjectKeys(ctx context.Context, projectID string, desired model, current *client.Project) (*client.Project, error) {
-	if current == nil {
-		current = &client.Project{ID: projectID}
+func (r *projectResource) reconcileProjectKeys(ctx context.Context, desired model, current *client.Project) (*client.Project, error) {
+	changed := false
+	for _, key := range []struct {
+		name    string
+		enabled bool
+		want    types.Bool
+		value   *string
+	}{
+		{"api_key", current.APIKeyEnabled, desired.APIKeyEnabled, &current.APIKey},
+		{"read_only_api_key", current.ReadOnlyAPIKeyEnabled, desired.ReadOnlyAPIKeyEnabled, &current.ReadOnlyAPIKey},
+		{"ping_key", current.PingKeyEnabled, desired.PingKeyEnabled, &current.PingKey},
+	} {
+		if key.want.IsNull() || key.want.IsUnknown() || key.enabled == key.want.ValueBool() {
+			continue
+		}
+		value, err := r.client.SetProjectKeyEnabled(ctx, current.ID, key.name, key.want.ValueBool())
+		if err != nil {
+			return nil, err
+		}
+		*key.value = value
+		changed = true
 	}
-
-	apiKey, err := r.client.SetProjectKeyEnabled(ctx, projectID, "api_key", desired.APIKeyEnabled.ValueBool())
-	if err != nil {
-		return nil, err
+	if !changed {
+		return current, nil
 	}
-	current.APIKeyEnabled = desired.APIKeyEnabled.ValueBool()
-	current.APIKey = apiKey
-
-	readOnlyKey, err := r.client.SetProjectKeyEnabled(ctx, projectID, "read_only_api_key", desired.ReadOnlyAPIKeyEnabled.ValueBool())
-	if err != nil {
-		return nil, err
-	}
-	current.ReadOnlyAPIKeyEnabled = desired.ReadOnlyAPIKeyEnabled.ValueBool()
-	current.ReadOnlyAPIKey = readOnlyKey
-
-	pingKey, err := r.client.SetProjectKeyEnabled(ctx, projectID, "ping_key", desired.PingKeyEnabled.ValueBool())
-	if err != nil {
-		return nil, err
-	}
-	current.PingKeyEnabled = desired.PingKeyEnabled.ValueBool()
-	current.PingKey = pingKey
-
-	return r.client.GetProject(ctx, projectID, current.APIKey, current.ReadOnlyAPIKey, current.PingKey)
+	return r.client.GetProject(ctx, current.ID, current.APIKey, current.ReadOnlyAPIKey, current.PingKey)
 }
 
-func newProjectModel(previous model, project *client.Project) model {
-	state := previous
-	state.ID = types.StringValue(project.ID)
-	state.Name = types.StringValue(project.Name)
-	state.APIKeyEnabled = types.BoolValue(project.APIKeyEnabled)
-	state.ReadOnlyAPIKeyEnabled = types.BoolValue(project.ReadOnlyAPIKeyEnabled)
-	state.PingKeyEnabled = types.BoolValue(project.PingKeyEnabled)
-
-	if project.APIKeyEnabled {
-		if project.APIKey != "" {
-			state.APIKey = types.StringValue(project.APIKey)
+func newProjectModel(project *client.Project) model {
+	keyValue := func(enabled bool, value string) types.String {
+		if !enabled || value == "" {
+			return types.StringNull()
 		}
-	} else {
-		state.APIKey = types.StringNull()
+		return types.StringValue(value)
 	}
-
-	if project.ReadOnlyAPIKeyEnabled {
-		if project.ReadOnlyAPIKey != "" {
-			state.ReadOnlyAPIKey = types.StringValue(project.ReadOnlyAPIKey)
-		}
-	} else {
-		state.ReadOnlyAPIKey = types.StringNull()
+	return model{
+		ID:                    types.StringValue(project.ID),
+		Name:                  types.StringValue(project.Name),
+		APIKey:                keyValue(project.APIKeyEnabled, project.APIKey),
+		APIKeyEnabled:         types.BoolValue(project.APIKeyEnabled),
+		ReadOnlyAPIKey:        keyValue(project.ReadOnlyAPIKeyEnabled, project.ReadOnlyAPIKey),
+		ReadOnlyAPIKeyEnabled: types.BoolValue(project.ReadOnlyAPIKeyEnabled),
+		PingKey:               keyValue(project.PingKeyEnabled, project.PingKey),
+		PingKeyEnabled:        types.BoolValue(project.PingKeyEnabled),
 	}
-
-	if project.PingKeyEnabled {
-		if project.PingKey != "" {
-			state.PingKey = types.StringValue(project.PingKey)
-		}
-	} else {
-		state.PingKey = types.StringNull()
-	}
-
-	return state
 }

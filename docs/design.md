@@ -11,7 +11,7 @@ Relevant routes and behaviors:
 - Project key management happens on the project settings page.
   - Confirmed form fields: `create_key=api_key`, `revoke_key=api_key`
   - Read-only API key and Ping key are also managed from the same settings table.
-  - The provider parses the current settings page to discover the create/revoke form fields for these additional keys instead of hardcoding undocumented names.
+  - The provider reads the key rows on the settings page before changing any key. Custom self-hosted forms must expose the key row and its create or revoke action. Unrecognized markup causes an error rather than a key action.
 - Team members managed on the same project settings form:
   - invite: `invite_team_member=1`, `email`, `role`
   - remove: `remove_team_member=1`, `email`
