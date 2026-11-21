@@ -42,8 +42,11 @@ func (r *resourceImpl) Schema(_ context.Context, _ resource.SchemaRequest, resp 
 		Attributes: map[string]schema.Attribute{
 			"id":         schema.StringAttribute{Computed: true},
 			"project_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
-			"email":      schema.StringAttribute{Required: true},
-			"role":       schema.StringAttribute{Required: true},
+			"email": schema.StringAttribute{
+				Required:            true,
+				MarkdownDescription: "Project member's email address. Matching is case-insensitive, and Terraform state preserves the configured spelling.",
+			},
+			"role": schema.StringAttribute{Required: true},
 		},
 	}
 }
@@ -69,7 +72,7 @@ func (r *resourceImpl) Create(ctx context.Context, req resource.CreateRequest, r
 	state := model{
 		ID:        types.StringValue(member.ProjectID + "/" + member.Email),
 		ProjectID: types.StringValue(member.ProjectID),
-		Email:     types.StringValue(member.Email),
+		Email:     plan.Email,
 		Role:      types.StringValue(member.Role),
 	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
@@ -90,7 +93,6 @@ func (r *resourceImpl) Read(ctx context.Context, req resource.ReadRequest, resp 
 		resp.Diagnostics.AddError("Unable to Read Project Member", err.Error())
 		return
 	}
-	state.Email = types.StringValue(member.Email)
 	state.Role = types.StringValue(member.Role)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -109,8 +111,8 @@ func (r *resourceImpl) Update(ctx context.Context, req resource.UpdateRequest, r
 		resp.Diagnostics.AddError("Unable to Update Project Member", err.Error())
 		return
 	}
-	state.ID = types.StringValue(member.ProjectID + "/" + member.Email)
-	state.Email = types.StringValue(member.Email)
+	state.ID = types.StringValue(member.ProjectID + "/" + strings.ToLower(member.Email))
+	state.Email = plan.Email
 	state.Role = types.StringValue(member.Role)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
@@ -134,5 +136,5 @@ func (r *resourceImpl) ImportState(ctx context.Context, req resource.ImportState
 	}
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("project_id"), parts[0])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("email"), parts[1])...)
-	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), req.ID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[0]+"/"+strings.ToLower(parts[1]))...)
 }

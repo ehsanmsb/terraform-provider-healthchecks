@@ -29,21 +29,49 @@ docker compose -f /tmp/healthchecks-upstream/docker/docker-compose.yml \
   up --build -d
 ```
 
-Create a login user:
+Create a login user. For acceptance tests, create a separate member account
+with the same command using `--email member@example.test`.
 
 ```bash
 docker compose -f /tmp/healthchecks-upstream/docker/docker-compose.yml \
   --env-file /tmp/healthchecks-upstream/docker/.env \
-  run --rm web \
-  /opt/healthchecks/manage.py shell -c \
-  "from django.contrib.auth.models import User; \
-   email='admin@example.test'; password='adminpass123'; \
-   u=User.objects.filter(email=email).first(); \
-   u = u or User.objects.create_superuser('admin', email, password); \
-   u.set_password(password); u.save(); print(email)"
+  exec web /opt/healthchecks/manage.py createsuperuser --email admin@example.test
 ```
 
-## 2. Build the Provider
+## 2. Run the Acceptance Suite
+
+The acceptance suite builds the provider and runs Terraform against a disposable
+self-hosted Healthchecks instance. Use two existing local accounts, one with a
+password and permission to create projects and a separate account to add as a
+project member. Use the owner account's exact email address as the username so
+Healthchecks can verify its email integration without SMTP. Use the published
+Docker host port for `HEALTHCHECKS_BASE_URL`.
+
+From the provider repository root, with Go and Terraform on your PATH:
+
+```bash
+export HEALTHCHECKS_BASE_URL=http://localhost:8000
+export HEALTHCHECKS_USERNAME=admin@example.test
+export HEALTHCHECKS_TEST_MEMBER_EMAIL=member@example.test
+IFS= read -r -s HEALTHCHECKS_PASSWORD
+export HEALTHCHECKS_PASSWORD
+TF_ACC=1 go test -v -count=1 -run '^TestAccProvider$' .
+unset HEALTHCHECKS_PASSWORD
+```
+
+Enter the local account's password when the `read` command waits for input.
+For consecutive runs, use a fresh disposable owner account to stay within the
+self-hosted instance's per-account password login limit.
+
+The test enables, disables and re-enables all three project key types. It
+creates, refreshes, updates, imports and deletes a project, a check, webhook and
+email integrations, and a project member whose email is supplied in uppercase.
+It verifies the channel changes through the check data source and checks for drift after each apply and after
+import. Terraform state and the CLI dev override live in temporary directories.
+The test attempts to destroy its project on failure. If cleanup fails, remove
+the test project named `Terraform Acceptance …` through the local UI.
+
+## 3. Build the Provider for Manual Smoke Tests
 
 From this repository:
 
@@ -52,7 +80,7 @@ mkdir -p .dist
 go build -o .dist/terraform-provider-healthchecks .
 ```
 
-## 3. Use Terraform Dev Overrides
+## 4. Use Terraform Dev Overrides
 
 Create a local CLI config file:
 
@@ -65,9 +93,9 @@ provider_installation {
 }
 ```
 
-## 4. Run the Smoke Test
+## 5. Run the Smoke Test
 
-Use the example in [examples/local_smoke](/Users/snapp/Documents/Github/terraform-provider-healthchecks/examples/local_smoke/main.tf:1):
+Use the example in [examples/local_smoke](../examples/local_smoke/main.tf):
 
 ```bash
 cd examples/local_smoke
@@ -86,9 +114,9 @@ This exercises:
 - `healthchecks_integration` with `webhook`
 - `healthchecks_project_member`
 
-## 5. Focused Project Key Test
+## 6. Focused Project Key Test
 
-Use [examples/project_keys_smoke](/Users/snapp/Documents/Github/terraform-provider-healthchecks/examples/project_keys_smoke/main.tf:1) to test just project key creation and toggling:
+Use [examples/project_keys_smoke](../examples/project_keys_smoke/main.tf) to test just project key creation and toggling:
 
 ```bash
 cd examples/project_keys_smoke
@@ -104,9 +132,9 @@ This focused example exercises:
 - `read_only_api_key_enabled`
 - `ping_key_enabled`
 
-## 6. Focused Project Integration Test
+## 7. Focused Project Integration Test
 
-Use [examples/project_integrations_smoke](/Users/snapp/Documents/Github/terraform-provider-healthchecks/examples/project_integrations_smoke/main.tf:1) to test a project with both supported integration types and a check wired to both:
+Use [examples/project_integrations_smoke](../examples/project_integrations_smoke/main.tf) to test a project with both supported integration types and a check wired to both:
 
 ```bash
 cd examples/project_integrations_smoke
@@ -122,9 +150,9 @@ This focused example exercises:
 - `healthchecks_integration` with `type = "email"`
 - `healthchecks_check.channels` attachment to both integrations
 
-## 7. Complete Project Example
+## 8. Complete Project Example
 
-Use [examples/complete_project](/Users/snapp/Documents/Github/terraform-provider-healthchecks/examples/complete_project/main.tf:1) for a fuller example that creates:
+Use [examples/complete_project](../examples/complete_project/main.tf) for a fuller example that creates:
 
 - one project
 - three checks

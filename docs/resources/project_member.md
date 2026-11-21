@@ -20,7 +20,7 @@ resource "healthchecks_project_member" "example" {
 
 ### Required
 
-- `email` (String)
+- `email` (String) Project member's email address. Matching is case-insensitive, and Terraform state preserves the configured spelling.
 - `project_id` (String)
 - `role` (String)
 
