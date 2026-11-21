@@ -31,3 +31,9 @@ Implementation note:
 - Projects, integrations, and project members use authenticated web forms because upstream does not currently expose equivalent public project-management endpoints.
 - The project resource manages the lifecycle of the read-write key and saves it in state. Downstream Management API operations use that key and report missing or rejected credentials without rotating the key.
 - Read-only API keys and Ping keys are treated as sensitive Terraform attributes as well, but the provider does not expose them in example outputs by default.
+
+## Web-form errors
+
+Web requests report failed HTTP responses and expired sessions. Integration creates, updates, and deletes also require Healthchecks to return to the project integration list. A rejected form can return HTTP 200 while remaining on the form page.
+
+Existing Terraform configurations and state need no migration. Self-hosted forks and reverse proxies must preserve the redirect to the project's integration list after a successful integration form submission.

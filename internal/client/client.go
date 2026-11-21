@@ -366,16 +366,12 @@ func (c *Client) DeleteProject(ctx context.Context, projectID string) error {
 	if err != nil {
 		return err
 	}
-	res, _, err := c.postForm(ctx, fmt.Sprintf("/projects/%s/remove/", projectID), url.Values{}, token)
+	_, _, err = c.postForm(ctx, fmt.Sprintf("/projects/%s/remove/", projectID), url.Values{}, token)
 	if err != nil {
 		if errors.Is(err, errNotFound) {
 			return nil
 		}
 		return err
-	}
-	defer res.Body.Close()
-	if res.StatusCode >= 400 {
-		return fmt.Errorf("delete project returned status %d", res.StatusCode)
 	}
 	return nil
 }
@@ -667,15 +663,8 @@ func (c *Client) createIntegrationChannel(ctx context.Context, in Integration, k
 	if err != nil {
 		return "", err
 	}
-	res, _, err := c.postForm(ctx, formPath, values, token)
-	if err != nil {
+	if err := c.postIntegrationForm(ctx, in.ProjectID, formPath, values, token); err != nil {
 		return "", err
-	}
-	defer res.Body.Close()
-
-	channelsPath := c.resolveURL(fmt.Sprintf("/projects/%s/integrations/", in.ProjectID)).Path
-	if res.StatusCode != http.StatusOK || res.Request == nil || res.Request.URL.Path != channelsPath {
-		return "", fmt.Errorf("Healthchecks did not confirm creation of the %s integration (HTTP %d); check the integration settings", kind, res.StatusCode)
 	}
 
 	after, err := c.ListChannels(ctx, in.ProjectID, in.ProjectAPIKey)
@@ -754,7 +743,7 @@ func (c *Client) UpdateWebhookIntegration(ctx context.Context, in Integration) (
 		return nil, err
 	}
 	values := webhookConfigToFormValues(in.Name, in.Config)
-	if _, _, err := c.postForm(ctx, fmt.Sprintf("/integrations/%s/edit/", in.ID), values, token); err != nil {
+	if err := c.postIntegrationForm(ctx, in.ProjectID, fmt.Sprintf("/integrations/%s/edit/", in.ID), values, token); err != nil {
 		return nil, err
 	}
 	return c.GetWebhookIntegration(ctx, in.ProjectID, in.ID)
@@ -774,13 +763,13 @@ func (c *Client) UpdateEmailIntegration(ctx context.Context, in Integration) (*I
 	}
 
 	values := emailConfigToFormValues(in.Config)
-	if _, _, err := c.postForm(ctx, fmt.Sprintf("/integrations/%s/edit/", in.ID), values, token); err != nil {
+	if err := c.postIntegrationForm(ctx, in.ProjectID, fmt.Sprintf("/integrations/%s/edit/", in.ID), values, token); err != nil {
 		return nil, err
 	}
 	return c.GetEmailIntegration(ctx, in.ProjectID, in.ID)
 }
 
-func (c *Client) DeleteIntegration(ctx context.Context, integrationID string) error {
+func (c *Client) DeleteIntegration(ctx context.Context, projectID, integrationID string) error {
 	if err := c.Login(ctx); err != nil {
 		return err
 	}
@@ -792,7 +781,7 @@ func (c *Client) DeleteIntegration(ctx context.Context, integrationID string) er
 	if err != nil {
 		return err
 	}
-	if _, _, err := c.postForm(ctx, fmt.Sprintf("/integrations/%s/remove/", integrationID), url.Values{}, token); err != nil {
+	if err := c.postIntegrationForm(ctx, projectID, fmt.Sprintf("/integrations/%s/remove/", integrationID), url.Values{}, token); err != nil {
 		if errors.Is(err, errNotFound) {
 			return nil
 		}
@@ -908,14 +897,8 @@ func (c *Client) getDocument(ctx context.Context, p string) (*goquery.Document, 
 	if p == loginPath && res.StatusCode == http.StatusTooManyRequests {
 		return nil, errLoginRateLimited
 	}
-	if res.StatusCode == http.StatusNotFound {
-		return nil, errNotFound
-	}
-	if res.StatusCode == http.StatusForbidden {
-		return nil, errForbidden
-	}
-	if res.StatusCode >= 400 {
-		return nil, fmt.Errorf("GET %s returned status %d", p, res.StatusCode)
+	if err := c.webResponseError(p, res); err != nil {
+		return nil, err
 	}
 	return goquery.NewDocumentFromReader(res.Body)
 }
@@ -934,13 +917,55 @@ func (c *Client) postForm(ctx context.Context, p string, values url.Values, csrf
 	if err != nil {
 		return nil, "", err
 	}
+	defer res.Body.Close()
+	if p != loginPath {
+		if err := c.webResponseError(p, res); err != nil {
+			return nil, "", err
+		}
+	}
 	bodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
-		res.Body.Close()
 		return nil, "", err
 	}
 	res.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 	return res, string(bodyBytes), nil
+}
+
+func (c *Client) webResponseError(p string, res *http.Response) error {
+	if p != loginPath && res.Request != nil && res.Request.URL != nil &&
+		strings.TrimRight(res.Request.URL.Path, "/") == strings.TrimRight(c.resolveURL(loginPath).Path, "/") {
+		c.loginMu.Lock()
+		c.loggedIn = false
+		c.loginMu.Unlock()
+		return errors.New("Healthchecks redirected to the login page. The web session is no longer valid. Run Terraform again.")
+	}
+
+	switch {
+	case res.StatusCode == http.StatusNotFound:
+		return errNotFound
+	case res.StatusCode == http.StatusForbidden:
+		return fmt.Errorf("Healthchecks web request to %s returned HTTP 403: %w", p, errForbidden)
+	case res.StatusCode < 200 || res.StatusCode >= 300:
+		return fmt.Errorf("Healthchecks web request to %s returned HTTP %d", p, res.StatusCode)
+	default:
+		return nil
+	}
+}
+
+func (c *Client) postIntegrationForm(ctx context.Context, projectID, path string, values url.Values, token string) error {
+	res, _, err := c.postForm(ctx, path, values, token)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	// A rejected form may return HTTP 200 without redirecting to the channel list.
+	channelsPath := c.resolveURL(fmt.Sprintf("/projects/%s/integrations/", projectID)).Path
+	if res.Request == nil || res.Request.URL == nil ||
+		strings.TrimRight(res.Request.URL.Path, "/") != strings.TrimRight(channelsPath, "/") {
+		return fmt.Errorf("Healthchecks did not confirm the integration change at %s. Check the integration settings and permissions.", path)
+	}
+	return nil
 }
 
 func (c *Client) apiJSON(ctx context.Context, method, p, apiKey string, payload any, target any) error {

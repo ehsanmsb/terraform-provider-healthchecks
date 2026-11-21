@@ -140,5 +140,5 @@ func (p *healthchecksProvider) Resources(_ context.Context) []func() resource.Re
 }
 
 func (p *healthchecksProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{checkresource.NewDataSource}
 }
