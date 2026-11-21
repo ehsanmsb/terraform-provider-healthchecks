@@ -449,3 +449,56 @@ func TestHTTP429RetryReplaysPostBody(t *testing.T) {
 		t.Fatalf("requests = %d, want 2", requests)
 	}
 }
+
+func TestDeleteIntegrationRejectsUnconfirmedWebResponses(t *testing.T) {
+	const removePath = "/integrations/channel/remove/"
+	for _, tc := range []struct {
+		name, finalPath, detail string
+		status                  int
+		expired                 bool
+	}{
+		{name: "forbidden", status: http.StatusForbidden, finalPath: removePath, detail: "HTTP 403"},
+		{name: "server error", status: http.StatusInternalServerError, finalPath: removePath, detail: "HTTP 500"},
+		{name: "expired session", status: http.StatusOK, finalPath: loginPath, detail: "redirected to the login page", expired: true},
+		{name: "unconfirmed", status: http.StatusOK, finalPath: removePath, detail: "did not confirm the integration change"},
+		{name: "missing", status: http.StatusNotFound, finalPath: removePath},
+		{name: "confirmed", status: http.StatusOK, finalPath: "/projects/project/integrations/"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := New(Config{BaseURL: "https://healthchecks.example.test/prefix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c.loggedIn = true
+			posts := 0
+			c.http.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				if req.Method == http.MethodGet && req.URL.Path == "/prefix/accounts/profile/" {
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Body:       io.NopCloser(strings.NewReader(`<input name="csrfmiddlewaretoken" value="test-token">`)),
+						Request:    req,
+					}, nil
+				}
+
+				posts++
+				if req.Method != http.MethodPost || req.URL.Path != "/prefix"+removePath {
+					t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+				}
+				req.Body.Close()
+				return &http.Response{
+					StatusCode: tc.status,
+					Body:       http.NoBody,
+					Request:    &http.Request{URL: c.resolveURL(tc.finalPath)},
+				}, nil
+			})
+
+			err = c.DeleteIntegration(context.Background(), "project", "channel")
+			if tc.detail == "" && err != nil || tc.detail != "" && (err == nil || !strings.Contains(err.Error(), tc.detail)) {
+				t.Fatalf("DeleteIntegration() error = %v, want %q", err, tc.detail)
+			}
+			if posts != 1 || c.loggedIn == tc.expired {
+				t.Fatalf("posts = %d, still logged in = %t", posts, c.loggedIn)
+			}
+		})
+	}
+}

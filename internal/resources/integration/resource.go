@@ -209,7 +209,7 @@ func (r *integrationResource) Delete(ctx context.Context, req resource.DeleteReq
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	if err := r.client.DeleteIntegration(ctx, state.ID.ValueString()); err != nil {
+	if err := r.client.DeleteIntegration(ctx, state.ProjectID.ValueString(), state.ID.ValueString()); err != nil {
 		resp.Diagnostics.AddError("Unable to Delete Integration", err.Error())
 	}
 }

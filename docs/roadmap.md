@@ -4,11 +4,8 @@ This document collects practical next steps for the Healthchecks Terraform provi
 
 ## High Priority
 
-- Add direct API key authentication to the provider
-  This reduces reliance on session login and makes automation friendlier for existing Healthchecks projects.
-
 - Add data sources
-  Good first targets are project, check, and integration lookup data sources.
+  Project and integration lookup remain open. Check lookup is available through the Management API.
 
 - Expand integration support beyond `webhook` and `email`
   Good next candidates are integrations with straightforward project-scoped form flows such as `ntfy`, `gotify`, `matrix`, `shell`, and `webhook`-adjacent types.

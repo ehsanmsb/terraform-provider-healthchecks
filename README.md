@@ -8,6 +8,7 @@ Terraform provider for [Healthchecks](https://github.com/healthchecks/healthchec
 - `healthchecks_check`
 - `healthchecks_integration` with `webhook` and `email` support
 - `healthchecks_project_member`
+- [`data "healthchecks_check"`](docs/data-sources/check.md) for looking up checks by UUID
 
 Project resources can also manage project-level secrets and access toggles:
 
