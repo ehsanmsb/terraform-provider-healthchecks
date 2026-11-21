@@ -502,3 +502,66 @@ func TestDeleteIntegrationRejectsUnconfirmedWebResponses(t *testing.T) {
 		})
 	}
 }
+
+func TestEnableExistingProjectKeysDoesNotSubmitForm(t *testing.T) {
+	c, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.loggedIn = true
+	c.http.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.Method != http.MethodGet || req.URL.Path != "/projects/project/settings/" {
+			t.Fatalf("unexpected request: %s %s", req.Method, req.URL.Path)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Request:    req,
+			Body: io.NopCloser(strings.NewReader(`<table id="api-keys">
+				<tr><td>API key</td><td><button data-revoke-key="api_key">Revoke</button></td></tr>
+				<tr><td>Read-only API key</td><td><button data-revoke-key="read_only_api_key">Revoke</button></td></tr>
+				<tr><td>Ping key</td><td><button data-revoke-key="ping_key">Revoke</button></td></tr>
+			</table>`)),
+		}, nil
+	})
+	for _, keyName := range []string{projectKeyAPIKey, projectKeyReadOnlyAPIKey, projectKeyPingKey} {
+		if key, err := c.SetProjectKeyEnabled(context.Background(), "project", keyName, true); err != nil || key != "" {
+			t.Fatalf("enable %s returned a plaintext key or an error: %v", keyName, err)
+		}
+	}
+}
+
+func TestWebFormTransportUsesFreshConnectionsForFormPosts(t *testing.T) {
+	c, err := New(Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := c.http.Transport.(webFormTransport)
+	if transport.normal.(*http.Transport).DisableKeepAlives || !transport.forms.(*http.Transport).DisableKeepAlives {
+		t.Fatal("unexpected keep-alive settings for normal and form requests")
+	}
+
+	var used string
+	record := func(name string) http.RoundTripper {
+		return roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			used = name
+			return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody, Request: req}, nil
+		})
+	}
+	testTransport := webFormTransport{normal: record("normal"), forms: record("form")}
+	for _, tc := range []struct{ method, contentType, want string }{
+		{http.MethodGet, "", "normal"},
+		{http.MethodPost, "application/json", "normal"},
+		{http.MethodPost, formContentType, "form"},
+	} {
+		req := &http.Request{Method: tc.method, Header: make(http.Header)}
+		req.Header.Set("Content-Type", tc.contentType)
+		res, err := testTransport.RoundTrip(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if used != tc.want {
+			t.Fatalf("%s %s used %s, want %s", tc.method, tc.contentType, used, tc.want)
+		}
+	}
+}

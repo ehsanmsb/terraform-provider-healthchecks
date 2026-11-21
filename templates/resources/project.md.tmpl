@@ -20,6 +20,8 @@ Import is supported using the following syntax:
 
 ## Notes
 
+- New projects enable the read-write key by default. The read-only and ping keys start disabled. For an existing project, omit a key toggle to preserve its current setting or set it explicitly to manage the setting.
+- Imported projects retain existing keys. If Healthchecks cannot return the original plaintext, the corresponding sensitive output is null. Supply an existing read-write key to dependent checks through `project_api_key` or the provider's `api_key`.
 - `api_key` is the read-write Management API key used for check CRUD operations.
 - If the stored read-write key is missing or rejected, apply only the project resource with `api_key_enabled = false`, then apply it again with `api_key_enabled = true`. This replaces the remote key, so update any other clients that use it.
 - `read_only_api_key` is useful for dashboard or read-only integrations.

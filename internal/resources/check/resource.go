@@ -10,7 +10,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -63,13 +62,13 @@ func (r *checkResource) Schema(_ context.Context, _ resource.SchemaRequest, resp
 			},
 			"name":     schema.StringAttribute{Required: true},
 			"slug":     schema.StringAttribute{Optional: true, Computed: true},
-			"tags":     schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, nil))},
+			"tags":     schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true},
 			"desc":     schema.StringAttribute{Optional: true},
 			"timeout":  schema.Int64Attribute{Optional: true, Computed: true},
 			"grace":    schema.Int64Attribute{Optional: true, Computed: true},
 			"schedule": schema.StringAttribute{Optional: true},
 			"tz":       schema.StringAttribute{Optional: true, Computed: true},
-			"channels": schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true, Default: listdefault.StaticValue(types.ListValueMust(types.StringType, nil))},
+			"channels": schema.ListAttribute{Optional: true, ElementType: types.StringType, Computed: true},
 			"uuid":     schema.StringAttribute{Computed: true},
 			"ping_url": schema.StringAttribute{Computed: true},
 			"status":   schema.StringAttribute{Computed: true},
@@ -179,12 +178,12 @@ func buildPayload(m model) map[string]any {
 	if !m.TZ.IsNull() && m.TZ.ValueString() != "" {
 		payload["tz"] = m.TZ.ValueString()
 	}
-	if !m.Tags.IsNull() && m.Tags.Elements() != nil {
+	if !m.Tags.IsNull() && !m.Tags.IsUnknown() {
 		var tags []string
 		_ = m.Tags.ElementsAs(context.Background(), &tags, false)
 		payload["tags"] = strings.Join(tags, " ")
 	}
-	if !m.Channels.IsNull() && m.Channels.Elements() != nil {
+	if !m.Channels.IsNull() && !m.Channels.IsUnknown() {
 		var channels []string
 		_ = m.Channels.ElementsAs(context.Background(), &channels, false)
 		payload["channels"] = strings.Join(channels, ",")

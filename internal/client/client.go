@@ -27,7 +27,22 @@ var (
 	errLoginRateLimited = errors.New("Healthchecks password login rate limit reached. Wait before running Terraform again.")
 )
 
-const loginPath = "/accounts/login/"
+const (
+	loginPath       = "/accounts/login/"
+	formContentType = "application/x-www-form-urlencoded"
+)
+
+type webFormTransport struct {
+	normal http.RoundTripper
+	forms  http.RoundTripper
+}
+
+func (t webFormTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method == http.MethodPost && req.Header.Get("Content-Type") == formContentType {
+		return t.forms.RoundTrip(req)
+	}
+	return t.normal.RoundTrip(req)
+}
 
 type Config struct {
 	BaseURL            string
@@ -137,17 +152,22 @@ func New(cfg Config) (*Client, error) {
 		timeout = 30 * time.Second
 	}
 
+	transport := &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify},
+	}
+	forms := transport.Clone()
+	// A stale keep-alive connection can fail during a form write whose outcome is unknown.
+	forms.DisableKeepAlives = true
+
 	return &Client{
 		baseURL:  u,
 		username: cfg.Username,
 		password: cfg.Password,
 		apiKey:   cfg.APIKey,
 		http: &http.Client{
-			Timeout: timeout,
-			Jar:     jar,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify},
-			},
+			Timeout:   timeout,
+			Jar:       jar,
+			Transport: webFormTransport{normal: transport, forms: forms},
 		},
 		userAgent:      cfg.UserAgent,
 		projectAPIKeys: map[string]string{},
@@ -253,18 +273,7 @@ func (c *Client) CreateProject(ctx context.Context, name string) (*Project, erro
 		return nil, fmt.Errorf("create project returned status %d: %w", res.StatusCode, err)
 	}
 
-	project, err := c.GetProject(ctx, projectID, "", "", "")
-	if err != nil {
-		return nil, err
-	}
-
-	apiKey, err := c.EnsureProjectAPIKey(ctx, projectID)
-	if err != nil {
-		return nil, err
-	}
-	project.APIKey = apiKey
-	project.APIKeyEnabled = apiKey != ""
-	return project, nil
+	return c.GetProject(ctx, projectID, "", "", "")
 }
 
 func (c *Client) GetProject(ctx context.Context, projectID, stateAPIKey, stateReadOnlyAPIKey, statePingKey string) (*Project, error) {
@@ -328,11 +337,11 @@ func (c *Client) GetProject(ctx context.Context, projectID, stateAPIKey, stateRe
 	return project, nil
 }
 
-func (c *Client) UpdateProject(ctx context.Context, projectID, name string) (*Project, error) {
+func (c *Client) UpdateProject(ctx context.Context, project Project) (*Project, error) {
 	if err := c.Login(ctx); err != nil {
 		return nil, err
 	}
-	doc, err := c.getDocument(ctx, projectSettingsPath(projectID))
+	doc, err := c.getDocument(ctx, projectSettingsPath(project.ID))
 	if err != nil {
 		return nil, err
 	}
@@ -343,12 +352,12 @@ func (c *Client) UpdateProject(ctx context.Context, projectID, name string) (*Pr
 
 	values := url.Values{
 		"set_project_name": {"1"},
-		"name":             {name},
+		"name":             {project.Name},
 	}
-	if _, _, err := c.postForm(ctx, projectSettingsPath(projectID), values, token); err != nil {
+	if _, _, err := c.postForm(ctx, projectSettingsPath(project.ID), values, token); err != nil {
 		return nil, err
 	}
-	return c.GetProject(ctx, projectID, c.cachedProjectAPIKey(projectID), "", "")
+	return c.GetProject(ctx, project.ID, project.APIKey, project.ReadOnlyAPIKey, project.PingKey)
 }
 
 func (c *Client) DeleteProject(ctx context.Context, projectID string) error {
@@ -376,111 +385,41 @@ func (c *Client) DeleteProject(ctx context.Context, projectID string) error {
 	return nil
 }
 
-func (c *Client) EnsureProjectAPIKey(ctx context.Context, projectID string) (string, error) {
-	if cached := c.cachedProjectAPIKey(projectID); cached != "" {
-		return cached, nil
-	}
-	key, err := c.ensureProjectKey(ctx, projectID, projectKeyAPIKey)
-	if err != nil {
-		return "", err
-	}
-	c.RememberProjectAPIKey(projectID, key)
-	return key, nil
-}
-
-func (c *Client) EnsureProjectReadOnlyAPIKey(ctx context.Context, projectID string) (string, error) {
-	return c.ensureProjectKey(ctx, projectID, projectKeyReadOnlyAPIKey)
-}
-
-func (c *Client) EnsureProjectPingKey(ctx context.Context, projectID string) (string, error) {
-	return c.ensureProjectKey(ctx, projectID, projectKeyPingKey)
-}
-
 func (c *Client) SetProjectKeyEnabled(ctx context.Context, projectID, keyName string, enabled bool) (string, error) {
-	if enabled {
-		switch keyName {
-		case projectKeyAPIKey:
-			return c.EnsureProjectAPIKey(ctx, projectID)
-		case projectKeyReadOnlyAPIKey:
-			return c.EnsureProjectReadOnlyAPIKey(ctx, projectID)
-		case projectKeyPingKey:
-			return c.EnsureProjectPingKey(ctx, projectID)
-		default:
-			return "", fmt.Errorf("unsupported project key %q", keyName)
+	if !enabled {
+		if err := c.revokeProjectKey(ctx, projectID, keyName); err != nil {
+			return "", err
 		}
+		if keyName == projectKeyAPIKey {
+			c.ForgetProjectAPIKey(projectID)
+		}
+		return "", nil
 	}
 
-	if err := c.toggleProjectKey(ctx, projectID, keyName, false); err != nil {
-		return "", err
-	}
-	if keyName == projectKeyAPIKey {
-		c.ForgetProjectAPIKey(projectID)
-	}
-	return "", nil
-}
-
-func (c *Client) ensureProjectKey(ctx context.Context, projectID, keyName string) (string, error) {
-	if keyName == projectKeyAPIKey {
-		if cached := c.cachedProjectAPIKey(projectID); cached != "" {
-			return cached, nil
-		}
-	}
 	if err := c.Login(ctx); err != nil {
 		return "", err
 	}
-
 	doc, err := c.getDocument(ctx, projectSettingsPath(projectID))
 	if err != nil {
 		return "", err
 	}
-	keys := parseProjectKeyStates(doc)
-	keyState, ok := keys[keyName]
-	if ok && keyState.Plaintext != "" {
+	keyState, ok := parseProjectKeyStates(doc)[keyName]
+	if !ok {
+		return "", fmt.Errorf("project settings did not list key %s", keyName)
+	}
+	// Active keys may be stored hashed. Their absence from the form is not a reason to replace them.
+	if keyState.Enabled {
 		return keyState.Plaintext, nil
 	}
-	if keyName == projectKeyAPIKey && ok && keyState.Enabled {
-		if cached := c.cachedProjectAPIKey(projectID); cached != "" {
-			return cached, nil
-		}
-	}
 
-	if ok && !keyState.Enabled {
-		return c.submitProjectKeyAction(ctx, projectID, doc, keyState.CreateValues)
+	key, err := c.submitProjectKeyAction(ctx, projectID, doc, keyState.CreateValues)
+	if err != nil {
+		return "", err
 	}
-	if ok && len(keyState.CreateValues) > 0 {
-		return c.submitProjectKeyAction(ctx, projectID, doc, keyState.CreateValues)
-	}
-	if ok && keyState.Enabled && len(keyState.RevokeValues) > 0 {
-		if err := c.toggleProjectKey(ctx, projectID, keyName, false); err != nil {
-			return "", err
-		}
-		doc, err = c.getDocument(ctx, projectSettingsPath(projectID))
-		if err != nil {
-			return "", err
-		}
-		keys = parseProjectKeyStates(doc)
-		keyState = keys[keyName]
-		return c.submitProjectKeyAction(ctx, projectID, doc, keyState.CreateValues)
-	}
-
 	if keyName == projectKeyAPIKey {
-		token, err := extractCSRFToken(doc)
-		if err != nil {
-			return "", err
-		}
-		res, body, err := c.postForm(ctx, projectSettingsPath(projectID), url.Values{"create_key": {"api_key"}}, token)
-		if err != nil {
-			return "", err
-		}
-		defer res.Body.Close()
-		key := findCreatedProjectKey(body)
-		if key == "" {
-			return "", errors.New("project settings did not return a new API key")
-		}
-		return key, nil
+		c.RememberProjectAPIKey(projectID, key)
 	}
-
-	return "", fmt.Errorf("project settings did not expose an action for %s", keyName)
+	return key, nil
 }
 
 func (c *Client) submitProjectKeyAction(ctx context.Context, projectID string, doc *goquery.Document, values url.Values) (string, error) {
@@ -504,7 +443,7 @@ func (c *Client) submitProjectKeyAction(ctx context.Context, projectID string, d
 	return key, nil
 }
 
-func (c *Client) toggleProjectKey(ctx context.Context, projectID, keyName string, enabled bool) error {
+func (c *Client) revokeProjectKey(ctx context.Context, projectID, keyName string) error {
 	if err := c.Login(ctx); err != nil {
 		return err
 	}
@@ -519,15 +458,11 @@ func (c *Client) toggleProjectKey(ctx context.Context, projectID, keyName string
 		return fmt.Errorf("project settings did not list key %s", keyName)
 	}
 
-	if enabled == keyState.Enabled {
+	if !keyState.Enabled {
 		return nil
 	}
 
-	values := keyState.RevokeValues
-	if enabled {
-		values = keyState.CreateValues
-	}
-	if len(values) == 0 {
+	if len(keyState.RevokeValues) == 0 {
 		return fmt.Errorf("project settings did not expose a toggle action for %s", keyName)
 	}
 
@@ -535,7 +470,7 @@ func (c *Client) toggleProjectKey(ctx context.Context, projectID, keyName string
 	if err != nil {
 		return err
 	}
-	res, _, err := c.postForm(ctx, projectSettingsPath(projectID), values, token)
+	res, _, err := c.postForm(ctx, projectSettingsPath(projectID), keyState.RevokeValues, token)
 	if err != nil {
 		return err
 	}
@@ -911,7 +846,7 @@ func (c *Client) postForm(ctx context.Context, p string, values url.Values, csrf
 	if err != nil {
 		return nil, "", err
 	}
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Content-Type", formContentType)
 	req.Header.Set("Referer", c.resolveURL(p).String())
 	res, err := c.do(req)
 	if err != nil {
