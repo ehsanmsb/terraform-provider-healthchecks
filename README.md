@@ -6,11 +6,11 @@ Terraform provider for [Healthchecks](https://github.com/healthchecks/healthchec
 
 - `healthchecks_project`
 - `healthchecks_check`
-- `healthchecks_integration` with `webhook` and `email` support
+- `healthchecks_integration` with `webhook`, `email`, and `ntfy` support
 - `healthchecks_project_member`
 - [`data "healthchecks_check"`](docs/data-sources/check.md) for looking up checks by UUID
 - [`data "healthchecks_project"`](docs/data-sources/project.md) for project metadata and key status
-- [`data "healthchecks_integration"`](docs/data-sources/integration.md) for webhook and email lookups
+- [`data "healthchecks_integration"`](docs/data-sources/integration.md) for webhook, email and ntfy lookups
 
 Project resources can also manage project-level secrets and access toggles:
 

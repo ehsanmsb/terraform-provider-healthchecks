@@ -92,6 +92,18 @@ resource "healthchecks_integration" "email" {
   }
 }
 
+resource "healthchecks_integration" "ntfy" {
+  project_id      = healthchecks_project.test.id
+  project_api_key = var.importing ? null : var.project_key
+  type            = "ntfy"
+  ntfy = {
+    url         = "https://ntfy.example.test"
+    topic       = var.updated ? "acceptance-updated" : "acceptance"
+    priority_up = var.updated ? 1 : 3
+    token       = "acceptance-fixture-token"
+  }
+}
+
 data "healthchecks_project" "existing" {
   id = healthchecks_project.test.id
 }
@@ -110,12 +122,19 @@ data "healthchecks_integration" "email" {
   id              = healthchecks_integration.email.id
 }
 
+data "healthchecks_integration" "ntfy" {
+  provider   = healthchecks.api
+  project_id = healthchecks_project.test.id
+  type       = "ntfy"
+  id         = healthchecks_integration.ntfy.id
+}
+
 resource "healthchecks_check" "test" {
   provider   = healthchecks.api
   project_id = healthchecks_project.test.id
   name       = var.updated ? "Acceptance Check Updated" : "Acceptance Check"
   slug       = "acceptance-check"
-  channels   = var.updated ? [] : sort([data.healthchecks_integration.webhook.id, data.healthchecks_integration.email.id])
+  channels   = var.updated ? [] : sort([data.healthchecks_integration.webhook.id, data.healthchecks_integration.email.id, data.healthchecks_integration.ntfy.id])
 }
 
 data "healthchecks_check" "test" {
@@ -149,6 +168,8 @@ output "resources" {
       data.healthchecks_project.existing.ping_key_enabled,
     ])
     webhook_name = data.healthchecks_integration.webhook.name
+    ntfy         = data.healthchecks_integration.ntfy.id
+    ntfy_topic   = healthchecks_integration.ntfy.ntfy.topic
     check        = healthchecks_check.test.id
     webhook      = healthchecks_integration.webhook.id
     email        = healthchecks_integration.email.id

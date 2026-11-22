@@ -64,10 +64,9 @@ For consecutive runs, use a fresh disposable owner account to stay within the
 self-hosted instance's per-account password login limit.
 
 The test enables, disables and re-enables all three project key types. It
-creates, refreshes, updates, imports and deletes a project, a check, webhook and
-email integrations, and a project member whose email is supplied in uppercase.
-It verifies the channel changes through the check data source and checks for drift after each apply and after
-import. Terraform state and the CLI dev override live in temporary directories.
+creates, refreshes, updates, imports and deletes a project, a check, webhook, email and
+ntfy integrations, and a project member whose email is supplied in uppercase.
+It verifies the channel changes through the check data source and checks for drift after update and import. Terraform state and the CLI dev override live in temporary directories.
 The test attempts to destroy its project on failure. If cleanup fails, remove
 the test project named `Terraform Acceptance …` through the local UI.
 
@@ -134,7 +133,7 @@ This focused example exercises:
 
 ## 7. Focused Project Integration Test
 
-Use [examples/project_integrations_smoke](../examples/project_integrations_smoke/main.tf) to test a project with both supported integration types and a check wired to both:
+Use [examples/project_integrations_smoke](../examples/project_integrations_smoke/main.tf) to test a project with webhook and email integrations and a check wired to both:
 
 ```bash
 cd examples/project_integrations_smoke
@@ -182,3 +181,11 @@ and `check_id`. Run `terraform plan` from the example directory.
 
 To run against a development build, use the CLI dev override from step 4.
 For a Registry build, run `terraform init` before planning.
+
+## 10. Inspect Provider Debug Logs
+
+Set `TF_LOG_PROVIDER=DEBUG` when troubleshooting. For example, run
+`TF_LOG_PROVIDER=DEBUG terraform plan` from a fixture directory with the
+credentials set in the environment. Provider debug messages describe login,
+key toggles and integration form outcomes. Keep Terraform state and log files
+private when collecting diagnostics.

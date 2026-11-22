@@ -1,6 +1,6 @@
 # healthchecks_integration (Data Source)
 
-Reads metadata for an existing webhook or email integration. Configure the provider with the owning project's read-write `api_key` or set `project_api_key` on the data source. Pass the returned `id` to a check's `channels` list to attach the integration.
+Reads metadata for an existing webhook, email, or ntfy integration. Configure the provider with the owning project's read-write `api_key` or set `project_api_key` on the data source. Pass the returned `id` to a check's `channels` list to attach the integration.
 ## Example Usage
 
 ```terraform
@@ -26,7 +26,7 @@ variable "channel_id" {
 
 - `id` (String) Channel UUID from Healthchecks. Use it in a check's channels list.
 - `project_id` (String) ID of the project associated with the read-write API key.
-- `type` (String) Integration type: `webhook` or `email`.
+- `type` (String) Integration type: `webhook`, `email`, or `ntfy`.
 
 ### Optional
 

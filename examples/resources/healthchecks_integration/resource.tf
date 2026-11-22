@@ -37,3 +37,23 @@ resource "healthchecks_integration" "email" {
     up    = "false"
   }
 }
+
+resource "healthchecks_integration" "ntfy" {
+  project_id      = healthchecks_project.example.id
+  project_api_key = healthchecks_project.example.api_key
+  type            = "ntfy"
+
+  ntfy = {
+    url         = "https://ntfy.example.com"
+    topic       = "production"
+    priority    = 4
+    priority_up = 2
+    token       = var.ntfy_token
+  }
+}
+
+variable "ntfy_token" {
+  type      = string
+  sensitive = true
+  default   = null
+}

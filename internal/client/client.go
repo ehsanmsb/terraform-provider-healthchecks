@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 var (
@@ -203,9 +204,11 @@ func (c *Client) Login(ctx context.Context) error {
 		return errLoginRateLimited
 	}
 
+	tflog.Debug(ctx, "Fetching Healthchecks password login form")
 	doc, err := c.getDocument(ctx, loginPath)
 	if err != nil {
 		c.loginRateLimited = errors.Is(err, errLoginRateLimited)
+		tflog.Debug(ctx, "Healthchecks login form could not be read", map[string]any{"rate_limited": c.loginRateLimited})
 		return err
 	}
 
@@ -219,6 +222,7 @@ func (c *Client) Login(ctx context.Context) error {
 		"email":    {c.username},
 		"password": {c.password},
 	}
+	tflog.Debug(ctx, "Submitting Healthchecks password login")
 	res, body, err := c.postForm(ctx, loginPath, values, token)
 	if err != nil {
 		return err
@@ -227,6 +231,7 @@ func (c *Client) Login(ctx context.Context) error {
 
 	if res.StatusCode == http.StatusTooManyRequests || strings.Contains(body, "Too many attempts") {
 		c.loginRateLimited = true
+		tflog.Debug(ctx, "Healthchecks password login is rate limited")
 		return errLoginRateLimited
 	}
 	if res.StatusCode >= 400 {
@@ -244,6 +249,7 @@ func (c *Client) Login(ctx context.Context) error {
 	}
 
 	c.loggedIn = true
+	tflog.Debug(ctx, "Healthchecks web session established")
 	return nil
 }
 
@@ -386,6 +392,7 @@ func (c *Client) DeleteProject(ctx context.Context, projectID string) error {
 }
 
 func (c *Client) SetProjectKeyEnabled(ctx context.Context, projectID, keyName string, enabled bool) (string, error) {
+	tflog.Debug(ctx, "Setting Healthchecks project key status", map[string]any{"enabled": enabled})
 	if !enabled {
 		if err := c.revokeProjectKey(ctx, projectID, keyName); err != nil {
 			return "", err
@@ -409,6 +416,7 @@ func (c *Client) SetProjectKeyEnabled(ctx context.Context, projectID, keyName st
 	}
 	// Active keys may be stored hashed. Their absence from the form is not a reason to replace them.
 	if keyState.Enabled {
+		tflog.Debug(ctx, "Healthchecks project key is already enabled")
 		return keyState.Plaintext, nil
 	}
 
@@ -560,23 +568,8 @@ func (c *Client) withProjectAPIKey(projectID, apiKey string, fn func(apiKey stri
 	return err
 }
 
-func (c *Client) CreateWebhookIntegration(ctx context.Context, in Integration) (*Integration, error) {
-	id, err := c.createIntegrationChannel(ctx, in, "webhook", webhookConfigToFormValues(in.Name, in.Config))
-	if err != nil {
-		return nil, err
-	}
-	return c.GetWebhookIntegration(ctx, in.ProjectID, id)
-}
-
-func (c *Client) CreateEmailIntegration(ctx context.Context, in Integration) (*Integration, error) {
-	id, err := c.createIntegrationChannel(ctx, in, "email", emailConfigToFormValues(in.Config))
-	if err != nil {
-		return nil, err
-	}
-	return c.GetEmailIntegration(ctx, in.ProjectID, id)
-}
-
 func (c *Client) createIntegrationChannel(ctx context.Context, in Integration, kind string, values url.Values) (string, error) {
+	tflog.Debug(ctx, "Creating Healthchecks integration")
 	if err := c.Login(ctx); err != nil {
 		return "", err
 	}
@@ -609,102 +602,25 @@ func (c *Client) createIntegrationChannel(ctx context.Context, in Integration, k
 	return createdChannelID(before, after, kind)
 }
 
-func (c *Client) GetWebhookIntegration(ctx context.Context, projectID, channelID string) (*Integration, error) {
+func (c *Client) updateIntegrationChannel(ctx context.Context, in Integration, values url.Values) error {
+	tflog.Debug(ctx, "Updating Healthchecks integration")
 	if err := c.Login(ctx); err != nil {
-		return nil, err
+		return err
 	}
-	doc, err := c.getDocument(ctx, fmt.Sprintf("/integrations/%s/edit/", channelID))
+	path := fmt.Sprintf("/integrations/%s/edit/", in.ID)
+	doc, err := c.getDocument(ctx, path)
 	if err != nil {
-		return nil, err
-	}
-	config := map[string]string{}
-	for _, field := range []string{"url_down", "body_down", "headers_down", "url_up", "body_up", "headers_up"} {
-		if value, ok := extractNamedFieldValue(doc, field); ok && strings.TrimSpace(value) != "" {
-			config[field] = value
-		}
-	}
-	if value, ok := extractNamedSelectValue(doc, "method_down"); ok {
-		config["method_down"] = value
-	}
-	if value, ok := extractNamedSelectValue(doc, "method_up"); ok {
-		config["method_up"] = value
-	}
-	name, _ := extractNamedFieldValue(doc, "name")
-	return &Integration{
-		ID:        channelID,
-		ProjectID: projectID,
-		Type:      "webhook",
-		Name:      name,
-		Config:    config,
-	}, nil
-}
-
-func (c *Client) GetEmailIntegration(ctx context.Context, projectID, channelID string) (*Integration, error) {
-	if err := c.Login(ctx); err != nil {
-		return nil, err
-	}
-	doc, err := c.getDocument(ctx, fmt.Sprintf("/integrations/%s/edit/", channelID))
-	if err != nil {
-		return nil, err
-	}
-
-	value, ok := extractNamedFieldValue(doc, "value")
-	if !ok || strings.TrimSpace(value) == "" {
-		return nil, errors.New("channel did not return an email integration form; verify the channel ID")
-	}
-	config := map[string]string{"value": value}
-	config["up"] = boolString(extractNamedCheckboxValue(doc, "up"))
-	config["down"] = boolString(extractNamedCheckboxValue(doc, "down"))
-
-	return &Integration{
-		ID:        channelID,
-		ProjectID: projectID,
-		Type:      "email",
-		Name:      "",
-		Config:    config,
-	}, nil
-}
-
-func (c *Client) UpdateWebhookIntegration(ctx context.Context, in Integration) (*Integration, error) {
-	if err := c.Login(ctx); err != nil {
-		return nil, err
-	}
-	doc, err := c.getDocument(ctx, fmt.Sprintf("/integrations/%s/edit/", in.ID))
-	if err != nil {
-		return nil, err
+		return err
 	}
 	token, err := extractCSRFToken(doc)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	values := webhookConfigToFormValues(in.Name, in.Config)
-	if err := c.postIntegrationForm(ctx, in.ProjectID, fmt.Sprintf("/integrations/%s/edit/", in.ID), values, token); err != nil {
-		return nil, err
-	}
-	return c.GetWebhookIntegration(ctx, in.ProjectID, in.ID)
-}
-
-func (c *Client) UpdateEmailIntegration(ctx context.Context, in Integration) (*Integration, error) {
-	if err := c.Login(ctx); err != nil {
-		return nil, err
-	}
-	doc, err := c.getDocument(ctx, fmt.Sprintf("/integrations/%s/edit/", in.ID))
-	if err != nil {
-		return nil, err
-	}
-	token, err := extractCSRFToken(doc)
-	if err != nil {
-		return nil, err
-	}
-
-	values := emailConfigToFormValues(in.Config)
-	if err := c.postIntegrationForm(ctx, in.ProjectID, fmt.Sprintf("/integrations/%s/edit/", in.ID), values, token); err != nil {
-		return nil, err
-	}
-	return c.GetEmailIntegration(ctx, in.ProjectID, in.ID)
+	return c.postIntegrationForm(ctx, in.ProjectID, path, values, token)
 }
 
 func (c *Client) DeleteIntegration(ctx context.Context, projectID, integrationID string) error {
+	tflog.Debug(ctx, "Deleting Healthchecks integration")
 	if err := c.Login(ctx); err != nil {
 		return err
 	}
@@ -832,7 +748,7 @@ func (c *Client) getDocument(ctx context.Context, p string) (*goquery.Document, 
 	if p == loginPath && res.StatusCode == http.StatusTooManyRequests {
 		return nil, errLoginRateLimited
 	}
-	if err := c.webResponseError(p, res); err != nil {
+	if err := c.webResponseError(ctx, p, res); err != nil {
 		return nil, err
 	}
 	return goquery.NewDocumentFromReader(res.Body)
@@ -854,7 +770,7 @@ func (c *Client) postForm(ctx context.Context, p string, values url.Values, csrf
 	}
 	defer res.Body.Close()
 	if p != loginPath {
-		if err := c.webResponseError(p, res); err != nil {
+		if err := c.webResponseError(ctx, p, res); err != nil {
 			return nil, "", err
 		}
 	}
@@ -866,12 +782,13 @@ func (c *Client) postForm(ctx context.Context, p string, values url.Values, csrf
 	return res, string(bodyBytes), nil
 }
 
-func (c *Client) webResponseError(p string, res *http.Response) error {
+func (c *Client) webResponseError(ctx context.Context, p string, res *http.Response) error {
 	if p != loginPath && res.Request != nil && res.Request.URL != nil &&
 		strings.TrimRight(res.Request.URL.Path, "/") == strings.TrimRight(c.resolveURL(loginPath).Path, "/") {
 		c.loginMu.Lock()
 		c.loggedIn = false
 		c.loginMu.Unlock()
+		tflog.Debug(ctx, "Healthchecks redirected to login after the session expired")
 		return errors.New("Healthchecks redirected to the login page. The web session is no longer valid. Run Terraform again.")
 	}
 
@@ -898,8 +815,10 @@ func (c *Client) postIntegrationForm(ctx context.Context, projectID, path string
 	channelsPath := c.resolveURL(fmt.Sprintf("/projects/%s/integrations/", projectID)).Path
 	if res.Request == nil || res.Request.URL == nil ||
 		strings.TrimRight(res.Request.URL.Path, "/") != strings.TrimRight(channelsPath, "/") {
+		tflog.Debug(ctx, "Healthchecks did not redirect to the integration list", map[string]any{"status": res.StatusCode})
 		return fmt.Errorf("Healthchecks did not confirm the integration change at %s. Check the integration settings and permissions.", path)
 	}
+	tflog.Debug(ctx, "Healthchecks confirmed the integration change")
 	return nil
 }
 
@@ -1240,29 +1159,6 @@ func normalizeRoleLabel(role string) string {
 	default:
 		return role
 	}
-}
-
-func emailConfigToFormValues(config map[string]string) url.Values {
-	values := url.Values{}
-	if value := strings.TrimSpace(config["value"]); value != "" {
-		values.Set("value", value)
-	}
-	if ParseBoolString(config["down"], true) {
-		values.Set("down", "on")
-	}
-	if ParseBoolString(config["up"], true) {
-		values.Set("up", "on")
-	}
-	return values
-}
-
-func webhookConfigToFormValues(name string, config map[string]string) url.Values {
-	values := url.Values{}
-	for key, value := range config {
-		values.Set(key, value)
-	}
-	values.Set("name", name)
-	return values
 }
 
 func ParseBoolString(v string, defaultValue bool) bool {
