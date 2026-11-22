@@ -92,12 +92,30 @@ resource "healthchecks_integration" "email" {
   }
 }
 
+data "healthchecks_project" "existing" {
+  id = healthchecks_project.test.id
+}
+
+data "healthchecks_integration" "webhook" {
+  provider   = healthchecks.api
+  project_id = healthchecks_project.test.id
+  type       = "webhook"
+  id         = healthchecks_integration.webhook.id
+}
+
+data "healthchecks_integration" "email" {
+  project_id      = healthchecks_project.test.id
+  project_api_key = var.project_key
+  type            = "email"
+  id              = healthchecks_integration.email.id
+}
+
 resource "healthchecks_check" "test" {
   provider   = healthchecks.api
   project_id = healthchecks_project.test.id
   name       = var.updated ? "Acceptance Check Updated" : "Acceptance Check"
   slug       = "acceptance-check"
-  channels   = var.updated ? [] : sort([healthchecks_integration.webhook.id, healthchecks_integration.email.id])
+  channels   = var.updated ? [] : sort([data.healthchecks_integration.webhook.id, data.healthchecks_integration.email.id])
 }
 
 data "healthchecks_check" "test" {
@@ -123,10 +141,17 @@ output "keys" {
 
 output "resources" {
   value = {
-    project  = healthchecks_project.test.id
-    check    = healthchecks_check.test.id
-    webhook  = healthchecks_integration.webhook.id
-    email    = healthchecks_integration.email.id
-    channels = data.healthchecks_check.test.channels
+    project      = data.healthchecks_project.existing.id
+    project_name = data.healthchecks_project.existing.name
+    keys_enabled = alltrue([
+      data.healthchecks_project.existing.api_key_enabled,
+      data.healthchecks_project.existing.read_only_api_key_enabled,
+      data.healthchecks_project.existing.ping_key_enabled,
+    ])
+    webhook_name = data.healthchecks_integration.webhook.name
+    check        = healthchecks_check.test.id
+    webhook      = healthchecks_integration.webhook.id
+    email        = healthchecks_integration.email.id
+    channels     = data.healthchecks_check.test.channels
   }
 }

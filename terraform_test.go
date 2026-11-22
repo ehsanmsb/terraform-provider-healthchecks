@@ -78,9 +78,10 @@ func TestAccProvider(t *testing.T) {
   direct {}
 }
 `, filepath.ToSlash(binDir))))
+	projectName := fmt.Sprintf("Terraform Acceptance %d", time.Now().UnixNano())
 	env = append(env,
 		"TF_CLI_CONFIG_FILE="+config,
-		"TF_VAR_project_name="+fmt.Sprintf("Terraform Acceptance %d", time.Now().UnixNano()),
+		"TF_VAR_project_name="+projectName,
 		"TF_VAR_keys_enabled=true",
 		"TF_VAR_project_key=",
 		"TF_VAR_updated=false",
@@ -169,11 +170,14 @@ func TestAccProvider(t *testing.T) {
 	t.Log("Create the check, both integrations and a member, then verify attachment through the check data source")
 	apply()
 	type resources struct {
-		Project  string
-		Check    string
-		Webhook  string
-		Email    string
-		Channels []string
+		Project     string
+		ProjectName string `json:"project_name"`
+		KeysEnabled bool   `json:"keys_enabled"`
+		WebhookName string `json:"webhook_name"`
+		Check       string
+		Webhook     string
+		Email       string
+		Channels    []string
 	}
 	readResources := func() resources {
 		t.Helper()
@@ -185,6 +189,9 @@ func TestAccProvider(t *testing.T) {
 		return result
 	}
 	created := readResources()
+	if created.ProjectName != projectName || !created.KeysEnabled || created.WebhookName != "Acceptance Webhook" {
+		t.Fatal("data sources did not return the expected project and webhook metadata")
+	}
 	wantChannels := []string{created.Webhook, created.Email}
 	slices.Sort(wantChannels)
 	if created.Project == "" || created.Check == "" || created.Webhook == "" || created.Email == "" ||
@@ -197,6 +204,9 @@ func TestAccProvider(t *testing.T) {
 	env = append(env, "TF_VAR_updated=true")
 	apply()
 	updated := readResources()
+	if updated.ProjectName != projectName+" updated" || !updated.KeysEnabled || updated.WebhookName != "Acceptance Webhook Updated" {
+		t.Fatal("data sources did not refresh the updated metadata")
+	}
 	if updated.Project != created.Project || updated.Check != created.Check ||
 		updated.Webhook != created.Webhook || updated.Email != created.Email || len(updated.Channels) != 0 {
 		t.Fatal("the update should preserve resource IDs and detach both channels")
