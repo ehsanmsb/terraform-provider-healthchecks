@@ -9,6 +9,8 @@ Terraform provider for [Healthchecks](https://github.com/healthchecks/healthchec
 - `healthchecks_integration` with `webhook` and `email` support
 - `healthchecks_project_member`
 - [`data "healthchecks_check"`](docs/data-sources/check.md) for looking up checks by UUID
+- [`data "healthchecks_project"`](docs/data-sources/project.md) for project metadata and key status
+- [`data "healthchecks_integration"`](docs/data-sources/integration.md) for webhook and email lookups
 
 Project resources can also manage project-level secrets and access toggles:
 
@@ -28,7 +30,7 @@ go build ./...
 
 ## Provider Configuration
 
-Supply either `username` and `password` for web operations or `api_key` for checks in one existing project. API key authentication requires a read-write project key and the matching `project_id` on each check. See [provider authentication](docs/index.md#api-key-authentication) for configuration and password rate-limit behavior.
+Supply either `username` and `password` for web operations or `api_key` for checks and integration lookups in one existing project. API key authentication requires a read-write project key and the matching `project_id`. See [provider authentication](docs/index.md#api-key-authentication) for configuration and password rate-limit behavior.
 
 Example:
 

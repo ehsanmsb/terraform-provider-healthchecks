@@ -62,7 +62,7 @@ func (p *healthchecksProvider) Schema(_ context.Context, _ provider.SchemaReques
 			"api_key": schema.StringAttribute{
 				Optional:            true,
 				Sensitive:           true,
-				MarkdownDescription: "Read-write API key for one existing Healthchecks project. Use instead of username and password for check management.",
+				MarkdownDescription: "Read-write API key for one existing Healthchecks project. Use instead of username and password for check management and integration lookups.",
 			},
 			"insecure_skip_verify": schema.BoolAttribute{
 				Optional:            true,
@@ -140,5 +140,9 @@ func (p *healthchecksProvider) Resources(_ context.Context) []func() resource.Re
 }
 
 func (p *healthchecksProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{checkresource.NewDataSource}
+	return []func() datasource.DataSource{
+		projectresource.NewDataSource,
+		checkresource.NewDataSource,
+		integrationresource.NewDataSource,
+	}
 }

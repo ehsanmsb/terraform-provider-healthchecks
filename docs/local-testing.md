@@ -168,3 +168,17 @@ TF_VAR_password=adminpass123 \
 TF_CLI_CONFIG_FILE=/path/to/dev.tfrc \
 terraform apply -parallelism=1
 ```
+
+## 9. Look Up Resources Across Two Projects
+
+The [multi-project example](../examples/multi_project_api/main.tf) uses two
+provider aliases with a separate read-write API key for each project. It reads
+a webhook channel from one project and a check from the other.
+
+Set `TF_VAR_base_url` to the local instance and provide `TF_VAR_primary` and
+`TF_VAR_secondary` as JSON objects. The first object takes `project_id`,
+`api_key`, and `channel_id`. The second takes `project_id`, `api_key`,
+and `check_id`. Run `terraform plan` from the example directory.
+
+To run against a development build, use the CLI dev override from step 4.
+For a Registry build, run `terraform init` before planning.

@@ -1,0 +1,11 @@
+# healthchecks_integration (Data Source)
+
+Reads metadata for an existing webhook or email integration. Configure the provider with the owning project's read-write `api_key` or set `project_api_key` on the data source. Pass the returned `id` to a check's `channels` list to attach the integration.
+
+{{- if .HasExample }}
+## Example Usage
+
+{{ tffile .ExampleFile }}
+{{- end }}
+
+{{ .SchemaMarkdown | trimspace }}

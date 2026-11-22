@@ -25,7 +25,7 @@ variable "healthchecks_password" {
 
 ## API key authentication
 
-For checks in an existing project, set a read-write Management API key on the provider:
+For checks and integration lookups in an existing project, set a read-write Management API key on the provider:
 
 ```terraform
 variable "healthchecks_api_key" {
@@ -38,9 +38,9 @@ provider "healthchecks" {
 }
 ```
 
-Use the ID of the project that issued the key in each check's `project_id`. Use one provider alias per project when managing checks across several projects. An explicit `project_api_key` on a check can supply that check's key instead. When switching an existing check from API-key mode to username and password, first apply its `project_api_key` so Terraform can still refresh that check after the provider configuration changes.
+Set `project_id` to the ID of the project that issued the key. Use one provider alias per project when managing checks across several projects. An explicit `project_api_key` on a check can supply that check's key instead. When switching an existing check from API-key mode to username and password, first apply its `project_api_key` so Terraform can still refresh that check after the provider configuration changes.
 
-Use `username` and `password` for projects, integrations, and project members. Supply either those two fields or `api_key` on each provider instance. Web operations sign in when needed and share the session in the same configured provider client.
+Use `username` and `password` to look up projects and manage projects, integrations, and project members. Supply either those two fields or `api_key` on each provider instance. Web operations sign in when needed and share the session in the same configured provider client.
 
 Healthchecks limits password login attempts per account. If a Terraform run reports that the password login limit has been reached, wait for the limit to refill before running operations that need a web session. Terraform runs using only the Management API can continue with a valid project key.
 
@@ -67,7 +67,7 @@ export TF_VAR_healthchecks_timeout="30s"
 
 ### Optional
 
-- `api_key` (String, Sensitive) Read-write API key for one existing Healthchecks project. Use instead of username and password for check management.
+- `api_key` (String, Sensitive) Read-write API key for one existing Healthchecks project. Use instead of username and password for check management and integration lookups.
 - `base_url` (String) Base URL of the Healthchecks instance.
 - `insecure_skip_verify` (Boolean) Skip TLS certificate verification for self-hosted instances.
 - `password` (String, Sensitive) Healthchecks account password for web-session login.
