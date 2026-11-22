@@ -167,13 +167,15 @@ func TestAccProvider(t *testing.T) {
 		}
 	}
 
-	t.Log("Create the check, both integrations and a member, then verify attachment through the check data source")
+	t.Log("Create the check, all three integrations and a member, then verify attachment through the check data source")
 	apply()
 	type resources struct {
 		Project     string
 		ProjectName string `json:"project_name"`
 		KeysEnabled bool   `json:"keys_enabled"`
 		WebhookName string `json:"webhook_name"`
+		Ntfy        string
+		NtfyTopic   string `json:"ntfy_topic"`
 		Check       string
 		Webhook     string
 		Email       string
@@ -189,27 +191,26 @@ func TestAccProvider(t *testing.T) {
 		return result
 	}
 	created := readResources()
-	if created.ProjectName != projectName || !created.KeysEnabled || created.WebhookName != "Acceptance Webhook" {
+	if created.ProjectName != projectName || !created.KeysEnabled || created.WebhookName != "Acceptance Webhook" || created.NtfyTopic != "acceptance" {
 		t.Fatal("data sources did not return the expected project and webhook metadata")
 	}
-	wantChannels := []string{created.Webhook, created.Email}
+	wantChannels := []string{created.Webhook, created.Email, created.Ntfy}
 	slices.Sort(wantChannels)
 	if created.Project == "" || created.Check == "" || created.Webhook == "" || created.Email == "" ||
-		created.Webhook == created.Email || !slices.Equal(created.Channels, wantChannels) {
-		t.Fatal("the check was not attached to both distinct integrations")
+		created.Ntfy == "" || created.Webhook == created.Email || !slices.Equal(created.Channels, wantChannels) {
+		t.Fatal("the check was not attached to the expected integrations")
 	}
-	run(managed, "plan", "-no-color", "-detailed-exitcode")
 
-	t.Log("Update all resource types and detach both channels")
+	t.Log("Update all resource types and detach all channels")
 	env = append(env, "TF_VAR_updated=true")
 	apply()
 	updated := readResources()
-	if updated.ProjectName != projectName+" updated" || !updated.KeysEnabled || updated.WebhookName != "Acceptance Webhook Updated" {
+	if updated.ProjectName != projectName+" updated" || !updated.KeysEnabled || updated.WebhookName != "Acceptance Webhook Updated" || updated.NtfyTopic != "acceptance-updated" {
 		t.Fatal("data sources did not refresh the updated metadata")
 	}
 	if updated.Project != created.Project || updated.Check != created.Check ||
-		updated.Webhook != created.Webhook || updated.Email != created.Email || len(updated.Channels) != 0 {
-		t.Fatal("the update should preserve resource IDs and detach both channels")
+		updated.Webhook != created.Webhook || updated.Email != created.Email || updated.Ntfy != created.Ntfy || len(updated.Channels) != 0 {
+		t.Fatal("the update should preserve resource IDs and detach all channels")
 	}
 	run(managed, "plan", "-no-color", "-detailed-exitcode")
 
@@ -221,6 +222,7 @@ func TestAccProvider(t *testing.T) {
 		{"healthchecks_project.test", created.Project},
 		{"healthchecks_integration.webhook", created.Project + "/webhook/" + created.Webhook},
 		{"healthchecks_integration.email", created.Project + "/email/" + created.Email},
+		{"healthchecks_integration.ntfy", created.Project + "/ntfy/" + created.Ntfy},
 		{"healthchecks_check.test", created.Project + "/" + created.Check},
 		{"healthchecks_project_member.test", created.Project + "/" + member},
 	} {

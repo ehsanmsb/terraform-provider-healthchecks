@@ -30,11 +30,11 @@ func (d *integrationDataSource) Metadata(_ context.Context, req datasource.Metad
 
 func (d *integrationDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Looks up an existing webhook or email integration through the project Management API.",
+		MarkdownDescription: "Looks up an existing webhook, email, or ntfy integration through the project Management API.",
 		Attributes: map[string]schema.Attribute{
 			"id":         schema.StringAttribute{Required: true, MarkdownDescription: "Channel UUID from Healthchecks. Use it in a check's channels list."},
 			"project_id": schema.StringAttribute{Required: true, MarkdownDescription: "ID of the project associated with the read-write API key."},
-			"type":       schema.StringAttribute{Required: true, MarkdownDescription: "Integration type: `webhook` or `email`."},
+			"type":       schema.StringAttribute{Required: true, MarkdownDescription: "Integration type: `webhook`, `email`, or `ntfy`."},
 			"project_api_key": schema.StringAttribute{
 				Optional:            true,
 				Sensitive:           true,
@@ -59,8 +59,8 @@ func (d *integrationDataSource) Read(ctx context.Context, req datasource.ReadReq
 	}
 
 	kind := state.Type.ValueString()
-	if kind != "webhook" && kind != "email" {
-		resp.Diagnostics.AddError("Unsupported Integration Type", "Set type to webhook or email.")
+	if kind != "webhook" && kind != "email" && kind != "ntfy" {
+		resp.Diagnostics.AddError("Unsupported Integration Type", "Set type to webhook, email, or ntfy.")
 		return
 	}
 	channels, err := d.client.ListChannels(ctx, state.ProjectID.ValueString(), state.ProjectAPIKey.ValueString())

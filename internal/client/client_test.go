@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/hashicorp/terraform-plugin-log/tflogtest"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -370,6 +372,8 @@ func TestLoginSharesOneAttempt(t *testing.T) {
 				return res, nil
 			})
 
+			var logs bytes.Buffer
+			logCtx := tflogtest.RootLogger(context.Background(), &logs)
 			var attempts sync.WaitGroup
 			callers := 8
 			if tc.want == errUnauthorized {
@@ -379,12 +383,21 @@ func TestLoginSharesOneAttempt(t *testing.T) {
 				attempts.Add(1)
 				go func() {
 					defer attempts.Done()
-					if err := c.Login(context.Background()); !errors.Is(err, tc.want) {
+					if err := c.Login(logCtx); !errors.Is(err, tc.want) {
 						t.Errorf("Login() error = %v, want %v", err, tc.want)
 					}
 				}()
 			}
 			attempts.Wait()
+			trace := logs.String()
+			if !strings.Contains(trace, "Fetching Healthchecks password login form") {
+				t.Error("expected a login-stage log")
+			}
+			for _, secret := range []string{"user@example.com", "test-token", `"password"`} {
+				if strings.Contains(trace, secret) {
+					t.Error("login logs exposed a secret")
+				}
+			}
 
 			var wantPosts int32 = 1
 			if tc.getStatus == http.StatusTooManyRequests {

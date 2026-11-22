@@ -1,6 +1,6 @@
 # healthchecks_integration (Resource)
 
-Manages a project notification integration (Healthchecks channel). The current provider supports `webhook` and `email` integrations through authenticated web form endpoints.
+Manages a project notification integration (Healthchecks channel). The current provider supports `webhook`, `email`, and `ntfy` integrations through authenticated web form endpoints.
 
 {{- if .HasExample }}
 ## Example Usage
@@ -29,4 +29,6 @@ Import is supported using the following syntax:
 - The legacy `config` map is still accepted for webhook integrations, but the `webhook` block is the preferred interface.
 - Use the legacy `config` map only when you need backward compatibility with older provider versions.
 - Use `type = "email"` with `config.value` set to the destination email address. Omit `name` and `webhook` for email. The `config.up` and `config.down` flags default to `"true"` when omitted.
+- Use `type = "ntfy"` with the `ntfy` block. Set the server URL and topic, and optionally set down/up priorities and an access token.
+- Changing an integration's `type` replaces the channel and produces a new channel ID.
 - Integrations become active for a check when their channel ID is referenced in `healthchecks_check.channels`.

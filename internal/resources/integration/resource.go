@@ -3,8 +3,6 @@ package integration
 import (
 	"context"
 	"errors"
-	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -39,17 +37,7 @@ type model struct {
 	Name          types.String `tfsdk:"name"`
 	Config        types.Map    `tfsdk:"config"`
 	Webhook       types.Object `tfsdk:"webhook"`
-}
-
-type webhookModel struct {
-	MethodDown  types.String `tfsdk:"method_down"`
-	URLDown     types.String `tfsdk:"url_down"`
-	BodyDown    types.String `tfsdk:"body_down"`
-	HeadersDown types.Map    `tfsdk:"headers_down"`
-	MethodUp    types.String `tfsdk:"method_up"`
-	URLUp       types.String `tfsdk:"url_up"`
-	BodyUp      types.String `tfsdk:"body_up"`
-	HeadersUp   types.Map    `tfsdk:"headers_up"`
+	Ntfy          types.Object `tfsdk:"ntfy"`
 }
 
 func (r *integrationResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -58,7 +46,7 @@ func (r *integrationResource) Metadata(_ context.Context, req resource.MetadataR
 
 func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		MarkdownDescription: "Manages project integrations. The current implementation supports `webhook` and `email` channels through authenticated web form endpoints.",
+		MarkdownDescription: "Manages project integrations. The current implementation supports `webhook`, `email`, and `ntfy` channels through authenticated web form endpoints.",
 		Attributes: map[string]schema.Attribute{
 			"id":         schema.StringAttribute{Computed: true, PlanModifiers: []planmodifier.String{stringplanmodifier.UseStateForUnknown()}},
 			"project_id": schema.StringAttribute{Required: true, PlanModifiers: []planmodifier.String{stringplanmodifier.RequiresReplace()}},
@@ -67,14 +55,19 @@ func (r *integrationResource) Schema(_ context.Context, _ resource.SchemaRequest
 				Sensitive:           true,
 				MarkdownDescription: "Read-write API key used to identify the channel after creating the integration. Reference the project resource's api_key.",
 			},
-			"type": schema.StringAttribute{Required: true},
-			"name": schema.StringAttribute{Optional: true, MarkdownDescription: "Name of a webhook integration. Omit for email integrations."},
+			"type": schema.StringAttribute{
+				Required:            true,
+				MarkdownDescription: "Integration type. Changing type replaces the channel.",
+				PlanModifiers:       []planmodifier.String{stringplanmodifier.RequiresReplace()},
+			},
+			"name": schema.StringAttribute{Optional: true, MarkdownDescription: "Name of a webhook integration. Omit for email and ntfy integrations."},
 			"config": schema.MapAttribute{
 				Optional:            true,
 				Computed:            true,
 				ElementType:         types.StringType,
 				MarkdownDescription: "Legacy generic integration config map. Still supported for `type = \"email\"` and webhook backward compatibility, but the `webhook` block is the preferred interface for webhook integrations.",
 			},
+			"ntfy": ntfyAttribute(),
 			"webhook": schema.SingleNestedAttribute{
 				Optional:            true,
 				MarkdownDescription: "Structured webhook configuration. Preferred over the legacy `config` map for `type = \"webhook\"`.",
@@ -104,12 +97,15 @@ func (r *integrationResource) ValidateConfig(ctx context.Context, req resource.V
 	var integrationType, name types.String
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("type"), &integrationType)...)
 	resp.Diagnostics.Append(req.Config.GetAttribute(ctx, path.Root("name"), &name)...)
-	validateEmailName(integrationType, name, &resp.Diagnostics)
+	validateIntegrationName(integrationType, name, &resp.Diagnostics)
 }
 
-func validateEmailName(integrationType, name types.String, diags *diag.Diagnostics) {
+func validateIntegrationName(integrationType, name types.String, diags *diag.Diagnostics) {
 	if integrationType.ValueString() == "email" && name.ValueString() != "" {
 		diags.AddAttributeError(path.Root("name"), "Name Not Supported for Email Integrations", "Omit name when type is email.")
+	}
+	if integrationType.ValueString() == "ntfy" && name.ValueString() != "" {
+		diags.AddAttributeError(path.Root("name"), "Name Not Supported for ntfy Integrations", "Omit name when type is ntfy.")
 	}
 }
 
@@ -237,28 +233,18 @@ func mapToStrings(ctx context.Context, m types.Map) (map[string]string, error) {
 	return out, nil
 }
 
-func webhookHasValues(m webhookModel) bool {
-	for _, v := range []attr.Value{
-		m.MethodDown,
-		m.URLDown,
-		m.BodyDown,
-		m.HeadersDown,
-		m.MethodUp,
-		m.URLUp,
-		m.BodyUp,
-		m.HeadersUp,
-	} {
-		if !v.IsNull() && !v.IsUnknown() {
-			return true
-		}
-	}
-	return false
-}
-
 func configFromModel(ctx context.Context, plan model) (map[string]string, diag.Diagnostics) {
 	var diags diag.Diagnostics
-	validateEmailName(plan.Type, plan.Name, &diags)
+	validateIntegrationName(plan.Type, plan.Name, &diags)
 	if diags.HasError() {
+		return nil, diags
+	}
+
+	if plan.Type.ValueString() == "ntfy" {
+		return ntfyConfig(ctx, plan)
+	}
+	if !plan.Ntfy.IsNull() && !plan.Ntfy.IsUnknown() {
+		diags.AddError("ntfy Block Not Allowed", "Use the ntfy block with type ntfy.")
 		return nil, diags
 	}
 
@@ -326,95 +312,16 @@ func configFromModel(ctx context.Context, plan model) (map[string]string, diag.D
 	}
 }
 
-func webhookToConfig(ctx context.Context, webhook webhookModel) (map[string]string, error) {
-	config := map[string]string{}
-
-	for key, value := range map[string]types.String{
-		"method_down": webhook.MethodDown,
-		"url_down":    webhook.URLDown,
-		"body_down":   webhook.BodyDown,
-		"method_up":   webhook.MethodUp,
-		"url_up":      webhook.URLUp,
-		"body_up":     webhook.BodyUp,
-	} {
-		if !value.IsNull() && !value.IsUnknown() && strings.TrimSpace(value.ValueString()) != "" {
-			config[key] = value.ValueString()
-		}
-	}
-
-	for key, value := range map[string]types.Map{
-		"headers_down": webhook.HeadersDown,
-		"headers_up":   webhook.HeadersUp,
-	} {
-		headers, err := mapToStrings(ctx, value)
-		if err != nil {
-			return nil, err
-		}
-		if len(headers) == 0 {
-			continue
-		}
-		config[key] = joinHeaderLines(headers)
-	}
-
-	return config, nil
-}
-
-func joinHeaderLines(headers map[string]string) string {
-	keys := make([]string, 0, len(headers))
-	for key := range headers {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	lines := make([]string, 0, len(keys))
-	for _, key := range keys {
-		lines = append(lines, fmt.Sprintf("%s: %s", key, headers[key]))
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func parseHeaderLines(value string) map[string]string {
-	headers := map[string]string{}
-	for _, line := range strings.Split(value, "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, ":", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		headers[strings.TrimSpace(parts[0])] = strings.TrimSpace(parts[1])
-	}
-	return headers
-}
-
-func mapStringValues(values map[string]string) types.Map {
-	if len(values) == 0 {
-		return types.MapNull(types.StringType)
-	}
-
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	attrs := make(map[string]attr.Value, len(values))
-	for _, key := range keys {
-		attrs[key] = types.StringValue(values[key])
-	}
-
-	return types.MapValueMust(types.StringType, attrs)
-}
-
 func applyIntegration(ctx context.Context, state *model, in *client.Integration) diag.Diagnostics {
 	state.ID = types.StringValue(in.ID)
 	state.ProjectID = types.StringValue(in.ProjectID)
 	state.Type = types.StringValue(in.Type)
 	if !(state.Name.IsNull() && in.Name == "") {
 		state.Name = types.StringValue(in.Name)
+	}
+
+	if in.Type == "ntfy" {
+		return applyNtfy(ctx, state, in.Config)
 	}
 
 	values := map[string]attr.Value{}
@@ -438,35 +345,7 @@ func applyIntegration(ctx context.Context, state *model, in *client.Integration)
 		state.Config = types.MapValueMust(types.StringType, values)
 	}
 
-	if in.Type != "webhook" {
-		if state.Webhook.IsUnknown() {
-			state.Webhook = types.ObjectNull(state.Webhook.AttributeTypes(ctx))
-		}
-		return nil
-	}
-
-	if state.Webhook.IsNull() {
-		return nil
-	}
-	webhook, diags := types.ObjectValueFrom(ctx, state.Webhook.AttributeTypes(ctx), webhookModel{
-		MethodDown:  stringOrNull(in.Config["method_down"]),
-		URLDown:     stringOrNull(in.Config["url_down"]),
-		BodyDown:    stringOrNull(in.Config["body_down"]),
-		HeadersDown: mapStringValues(parseHeaderLines(in.Config["headers_down"])),
-		MethodUp:    stringOrNull(in.Config["method_up"]),
-		URLUp:       stringOrNull(in.Config["url_up"]),
-		BodyUp:      stringOrNull(in.Config["body_up"]),
-		HeadersUp:   mapStringValues(parseHeaderLines(in.Config["headers_up"])),
-	})
-	state.Webhook = webhook
-	return diags
-}
-
-func stringOrNull(value string) types.String {
-	if strings.TrimSpace(value) == "" {
-		return types.StringNull()
-	}
-	return types.StringValue(value)
+	return applyWebhook(ctx, state, in)
 }
 
 func (r *integrationResource) createIntegration(ctx context.Context, in client.Integration) (*client.Integration, error) {
@@ -475,8 +354,10 @@ func (r *integrationResource) createIntegration(ctx context.Context, in client.I
 		return r.client.CreateWebhookIntegration(ctx, in)
 	case "email":
 		return r.client.CreateEmailIntegration(ctx, in)
+	case "ntfy":
+		return r.client.CreateNtfyIntegration(ctx, in)
 	default:
-		return nil, errors.New("unsupported integration type: only `webhook` and `email` are currently implemented")
+		return nil, errors.New("unsupported integration type: use `webhook`, `email`, or `ntfy`")
 	}
 }
 
@@ -486,8 +367,10 @@ func (r *integrationResource) getIntegration(ctx context.Context, projectID, cha
 		return r.client.GetWebhookIntegration(ctx, projectID, channelID)
 	case "email":
 		return r.client.GetEmailIntegration(ctx, projectID, channelID)
+	case "ntfy":
+		return r.client.GetNtfyIntegration(ctx, projectID, channelID)
 	default:
-		return nil, errors.New("unsupported integration type: only `webhook` and `email` are currently implemented")
+		return nil, errors.New("unsupported integration type: use `webhook`, `email`, or `ntfy`")
 	}
 }
 
@@ -497,7 +380,9 @@ func (r *integrationResource) updateIntegration(ctx context.Context, in client.I
 		return r.client.UpdateWebhookIntegration(ctx, in)
 	case "email":
 		return r.client.UpdateEmailIntegration(ctx, in)
+	case "ntfy":
+		return r.client.UpdateNtfyIntegration(ctx, in)
 	default:
-		return nil, errors.New("unsupported integration type: only `webhook` and `email` are currently implemented")
+		return nil, errors.New("unsupported integration type: use `webhook`, `email`, or `ntfy`")
 	}
 }
